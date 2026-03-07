@@ -1,0 +1,59 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.production
+apps/api/.env
+apps/web/.env.local
+
+# Build outputs
+.next/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+*.egg
+.eggs/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Storage / data
+storage/
+*.sqlite3
+book_storage/
+
+# Docker volumes
+db_data/
+ollama_data/
+
+# Logs
+*.log
+logs/
+
+# Misc
+nul
+*.bak
+.claude/
+vibevoice/

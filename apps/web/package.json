@@ -1,0 +1,38 @@
+{
+  "name": "llm-book-club-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000"
+  },
+  "dependencies": {
+    "next": "15.1.3",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "clsx": "2.1.1",
+    "tailwind-merge": "2.6.0",
+    "class-variance-authority": "0.7.1",
+    "lucide-react": "0.468.0",
+    "@radix-ui/react-slot": "1.1.1",
+    "@radix-ui/react-dialog": "1.1.4",
+    "@radix-ui/react-tabs": "1.1.2",
+    "@radix-ui/react-select": "2.1.4",
+    "@radix-ui/react-scroll-area": "1.2.2",
+    "@radix-ui/react-tooltip": "1.1.6",
+    "react-markdown": "9.0.1",
+    "remark-gfm": "4.0.0",
+    "@tailwindcss/typography": "0.5.15"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2",
+    "tailwindcss": "3.4.17",
+    "postcss": "8.4.49",
+    "autoprefixer": "10.4.20"
+  }
+}
