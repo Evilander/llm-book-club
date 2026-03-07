@@ -33,6 +33,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - LOCAL_LLM_BASE_URL=http://ollama:11434/v1
       - LOCAL_EMBEDDINGS_BASE_URL=http://ollama:11434/v1
+      - BOOKS_DIR=/books
     env_file:
       - ./apps/api/.env
     ports:
@@ -44,6 +45,7 @@ services:
         condition: service_healthy
     volumes:
       - book_storage:/app/storage
+      - ${BOOKS_DIR:-./books}:/books:ro
 
   worker:
     build:
@@ -54,6 +56,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - LOCAL_LLM_BASE_URL=http://ollama:11434/v1
       - LOCAL_EMBEDDINGS_BASE_URL=http://ollama:11434/v1
+      - BOOKS_DIR=/books
     env_file:
       - ./apps/api/.env
     depends_on:
@@ -63,6 +66,7 @@ services:
         condition: service_healthy
     volumes:
       - book_storage:/app/storage
+      - ${BOOKS_DIR:-./books}:/books:ro
 
   web:
     build:
@@ -75,7 +79,9 @@ services:
       - api
 
   # VibeVoice Realtime TTS (OpenAI-compatible)
+  # Start with: docker compose --profile gpu up
   vibevoice:
+    profiles: ["gpu"]
     build:
       context: ./vibevoice
     ports:
@@ -95,20 +101,14 @@ services:
     restart: unless-stopped
 
   # Ollama for open-source LLM support
+  # Start with: docker compose --profile local up
   ollama:
+    profiles: ["local"]
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-    # Uncomment for GPU support (requires nvidia-container-toolkit):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
       interval: 30s

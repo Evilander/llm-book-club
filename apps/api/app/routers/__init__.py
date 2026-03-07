@@ -1,1 +1,1 @@
-from . import health, ingest, sessions, tts, memory  # noqa: F401
+from . import health, ingest, sessions, tts, memory, library  # noqa: F401

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(200, alias="MAX_UPLOAD_MB")
 
     # Local books directory for filesystem browsing
-    books_dir: str | None = Field("D:\\books", alias="BOOKS_DIR")
+    books_dir: str | None = Field(None, alias="BOOKS_DIR")
 
     cors_origins: str = Field("http://localhost:3000", alias="CORS_ORIGINS")  # comma-separated
     rate_limit_default: str = Field("60/minute", alias="RATE_LIMIT_DEFAULT")
