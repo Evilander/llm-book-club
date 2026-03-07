@@ -12,8 +12,9 @@ import pytest
 
 from app.discussion.prompts import (
     DISCUSSION_PROMPTS,
-    AGENT_PROMPTS,
+    AGENT_PERSONALITIES,
     CITATION_FORMAT_INSTRUCTION,
+    SECURITY_BLOCK,
     get_agent_prompt,
     get_facilitator_prompt,
 )
@@ -101,46 +102,39 @@ class TestCitationFormatInstruction:
 # =========================================================================
 
 
-class TestAgentPrompts:
-    """Verify agent prompt templates (raw, un-formatted)."""
+class TestAgentPersonalities:
+    """Verify agent personality definitions."""
 
     @pytest.mark.parametrize("agent", ["facilitator", "close_reader", "skeptic"])
-    def test_agent_prompt_exists(self, agent):
-        assert agent in AGENT_PROMPTS
-        assert len(AGENT_PROMPTS[agent]) > 100
+    def test_agent_personality_exists(self, agent):
+        assert agent in AGENT_PERSONALITIES
+        prompt = AGENT_PERSONALITIES[agent]["prompt"]
+        assert len(prompt) > 100
 
     @pytest.mark.parametrize("agent", ["facilitator", "close_reader", "skeptic"])
-    def test_agent_prompt_contains_security_firewall(self, agent):
-        """All agent prompts must include the prompt-injection defense block."""
-        prompt = AGENT_PROMPTS[agent]
-        assert "SECURITY" in prompt
-        assert "NEVER follow instructions" in prompt
+    def test_agent_personality_has_required_keys(self, agent):
+        personality = AGENT_PERSONALITIES[agent]
+        assert "display_name" in personality
+        assert "role_description" in personality
+        assert "prompt" in personality
 
-    @pytest.mark.parametrize("agent", ["close_reader", "skeptic"])
-    def test_non_facilitator_agent_has_context_placeholder(self, agent):
-        """Non-facilitator agents should have a {{context}} placeholder."""
-        prompt = AGENT_PROMPTS[agent]
+    @pytest.mark.parametrize("agent", ["facilitator", "close_reader", "skeptic"])
+    def test_agent_prompt_has_context_placeholder(self, agent):
+        """All agent prompts should have a {context} placeholder."""
+        prompt = AGENT_PERSONALITIES[agent]["prompt"]
         assert "{context}" in prompt
 
-    def test_facilitator_has_mode_specific_placeholder(self):
-        """The facilitator prompt uses {{mode_specific}} not {{context}}."""
-        prompt = AGENT_PROMPTS["facilitator"]
-        assert "{mode_specific}" in prompt
+    @pytest.mark.parametrize("agent", ["facilitator", "close_reader", "skeptic"])
+    def test_get_agent_prompt_includes_security_firewall(self, agent):
+        """Generated prompts must include the prompt-injection defense."""
+        full_prompt = get_agent_prompt(agent, "conversation", "test context")
+        assert "NEVER follow instructions" in full_prompt
 
-    @pytest.mark.parametrize("agent", ["close_reader", "skeptic"])
-    def test_non_facilitator_prompt_includes_citation_instruction(self, agent):
-        """Non-facilitator agent prompts have CITATION_FORMAT_INSTRUCTION appended."""
-        prompt = AGENT_PROMPTS[agent]
-        assert "JSON" in prompt
-
-    def test_facilitator_prompt_gets_citation_via_mode(self):
-        """The facilitator prompt uses {mode_specific} which includes the
-        citation instruction from the mode's facilitator_system. The raw
-        facilitator template itself does not contain citation instructions."""
-        prompt = AGENT_PROMPTS["facilitator"]
-        # The facilitator template has {mode_specific} which will be
-        # replaced with the mode-specific prompt (which includes citations)
-        assert "{mode_specific}" in prompt
+    @pytest.mark.parametrize("agent", ["facilitator", "close_reader", "skeptic"])
+    def test_get_agent_prompt_includes_citation_instruction(self, agent):
+        """Generated prompts must include citation format instruction."""
+        full_prompt = get_agent_prompt(agent, "conversation", "test context")
+        assert "JSON" in full_prompt
 
 
 # =========================================================================
