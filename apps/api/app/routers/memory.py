@@ -39,8 +39,7 @@ class ReadingUnitResponse(BaseModel):
     narrative_thread: Optional[str] = None
     summary: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class BookMemoryResponse(BaseModel):
@@ -68,8 +67,7 @@ class KeyMomentResponse(BaseModel):
     significance: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class ThemeCreate(BaseModel):
@@ -85,8 +83,7 @@ class ThemeResponse(BaseModel):
     mention_count: int
     first_appearance_unit_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class CharacterCreate(BaseModel):
@@ -102,8 +99,7 @@ class CharacterResponse(BaseModel):
     arc_notes: Optional[str] = None
     first_appearance_unit_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class UserNoteCreate(BaseModel):
@@ -121,8 +117,7 @@ class UserNoteResponse(BaseModel):
     reading_unit_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class ConnectionCreate(BaseModel):
