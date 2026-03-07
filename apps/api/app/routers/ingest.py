@@ -31,8 +31,7 @@ class BookResponse(BaseModel):
     ingest_error: str | None
     created_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class BookListResponse(BaseModel):
