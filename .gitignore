@@ -52,8 +52,12 @@ ollama_data/
 *.log
 logs/
 
+# TypeScript build info
+*.tsbuildinfo
+
 # Misc
 nul
 *.bak
 .claude/
+.serena/
 vibevoice/
