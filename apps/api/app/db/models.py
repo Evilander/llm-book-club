@@ -30,6 +30,12 @@ class IngestStatus(str, PyEnum):
 
 
 class DiscussionMode(str, PyEnum):
+    # New warm modes (primary)
+    CONVERSATION = "conversation"
+    FIRST_TIME = "first_time"
+    DEEP_DIVE = "deep_dive"
+    BIG_PICTURE = "big_picture"
+    # Legacy modes (backward compat)
     GUIDED = "guided"
     SOCRATIC = "socratic"
     POETRY = "poetry"
