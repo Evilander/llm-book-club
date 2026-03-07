@@ -171,7 +171,7 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
 
   // Debounced search
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
