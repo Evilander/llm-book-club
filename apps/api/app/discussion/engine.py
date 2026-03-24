@@ -25,12 +25,21 @@ from .prompts import DISCUSSION_PROMPTS
 from .memory_prompts import MemoryContext, build_memory_from_db
 from .metrics import CitationMetrics, build_citation_metrics, TurnMetrics
 from .token_budget import truncate_history, estimate_tokens
+from .sentence_splitter import SentenceSplitter
 
 import logging as _logging
 import re
 
 _logger = _logging.getLogger(__name__)
 
+
+# Per-agent voice mapping for TTS.  Each agent gets a distinct voice so
+# users can tell them apart in audio mode without visual cues.
+AGENT_VOICES: dict[str, str] = {
+    "facilitator": "nova",       # Sam: warm, energetic
+    "close_reader": "shimmer",   # Ellis: precise, measured
+    "skeptic": "echo",           # Kit: dry, questioning
+}
 
 STYLE_GUIDANCE = {
     "critical_analysis": "Prioritize close reading, counterarguments, and evidence-backed disagreement. Treat unsupported claims as invitations for scrutiny.",
@@ -532,11 +541,17 @@ class DiscussionEngine:
 
         Event types:
           - {"type":"turn_classification", ..., "classification":{...}}  (adaptive only)
-          - {"type":"message_start", ...}
+          - {"type":"message_start", ..., "voice":...}
           - {"type":"message_delta", ..., "delta":...}
+          - {"type":"sentence_ready", ..., "sentence":..., "sentence_index":..., "voice":...}
           - {"type":"message_end", ..., "content":..., "citations":[...]}
           - {"type":"agent_error", ..., "error":...}  (partial failure)
           - {"type":"done", ...}
+
+        The ``sentence_ready`` events enable sentence-level TTS pipelining:
+        the frontend can fire a TTS request for each sentence as it completes,
+        rather than waiting for the full message_end. Each event includes the
+        agent's assigned ``voice`` for consistent per-agent TTS.
         """
         import uuid
 
@@ -573,6 +588,8 @@ class DiscussionEngine:
         async def stream_agent(agent, role: str):
             nonlocal event_seq
 
+            voice = AGENT_VOICES.get(role, "nova")
+
             event_seq += 1
             yield {
                 "type": "message_start",
@@ -581,10 +598,12 @@ class DiscussionEngine:
                 "agent_id": role,
                 "sequence": event_seq,
                 "role": role,
+                "voice": voice,
                 "session_id": self.session.id,
             }
 
             chunks_list: list[str] = []
+            splitter = SentenceSplitter()
             try:
                 async for delta in agent.stream_with_retrieval(history, query=retrieval_query):
                     # Record TTFT on first content delta of the entire turn
@@ -601,6 +620,40 @@ class DiscussionEngine:
                         "role": role,
                         "session_id": self.session.id,
                         "delta": delta,
+                    }
+
+                    # Sentence-level TTS pipelining: emit complete sentences
+                    # as they're detected so the frontend can fire TTS early.
+                    for sentence in splitter.feed(delta):
+                        event_seq += 1
+                        yield {
+                            "type": "sentence_ready",
+                            "event_id": f"evt_{event_seq}",
+                            "turn_id": turn_id,
+                            "agent_id": role,
+                            "sequence": event_seq,
+                            "role": role,
+                            "voice": voice,
+                            "session_id": self.session.id,
+                            "sentence": sentence,
+                            "sentence_index": splitter.sentence_index - 1,
+                        }
+
+                # Flush any remaining buffered text as a final sentence
+                remainder = splitter.flush()
+                if remainder:
+                    event_seq += 1
+                    yield {
+                        "type": "sentence_ready",
+                        "event_id": f"evt_{event_seq}",
+                        "turn_id": turn_id,
+                        "agent_id": role,
+                        "sequence": event_seq,
+                        "role": role,
+                        "voice": voice,
+                        "session_id": self.session.id,
+                        "sentence": remainder,
+                        "sentence_index": splitter.sentence_index - 1,
                     }
             except Exception as e:
                 # Partial failure: rollback any poisoned transaction state so
