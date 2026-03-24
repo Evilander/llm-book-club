@@ -553,6 +553,7 @@ class BaseAgent:
         memory: MemoryContext | None = None,
         allowed_section_ids: list[str] | None = None,
         allowed_chunk_ids: list[str] | None = None,
+        adult_mode: bool = False,
     ):
         self.llm = llm_client
         self.db = db
@@ -560,13 +561,15 @@ class BaseAgent:
         self.context = context
         self.mode = mode
         self.memory = memory
+        self.adult_mode = adult_mode
         self.allowed_section_ids = list(allowed_section_ids or [])
         self.allowed_chunk_ids = list(allowed_chunk_ids or [])
         # Store retrieved chunks for potential citation repair
         self._last_retrieved_chunks: list[dict] = []
         # Use memory-aware prompt if memory is available, otherwise standard prompt
         self.system_prompt = get_memory_aware_prompt(
-            self.agent_type, mode, context, memory
+            self.agent_type, mode, context, memory,
+            adult_mode=adult_mode,
         )
 
     def _build_retrieval_context(self, results: list[SearchResult]) -> str:

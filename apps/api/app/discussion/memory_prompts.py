@@ -452,16 +452,19 @@ def get_memory_aware_prompt(
     mode: str,
     context: str,
     memory: MemoryContext | None = None,
+    *,
+    adult_mode: bool = False,
 ) -> str:
     """
     Get a memory-aware prompt for an agent.
 
     If memory is None, falls back to standard prompts.
+    When *adult_mode* is True, erotic personality overlays are layered in.
     """
     if memory is None:
         # Import and use standard prompts
         from .prompts import get_agent_prompt
-        return get_agent_prompt(agent_type, mode, context)
+        return get_agent_prompt(agent_type, mode, context, adult_mode=adult_mode)
 
     memory_block = build_memory_context_block(memory)
     progress_pct = memory.reading_progress_pct
@@ -483,13 +486,22 @@ def get_memory_aware_prompt(
 
     template = prompts.get(agent_type, MEMORY_AWARE_FACILITATOR)
 
-    return template.format(
+    result = template.format(
         personality=PERSONALITY_CORE,
         memory_context=memory_block,
         context=context,
         progress_pct=progress_pct,
         phase_guidance=phase_guidance,
     )
+
+    # Layer adult overlay when session is in erotic/sexy mode
+    if adult_mode:
+        from .prompts import ADULT_AGENT_OVERLAYS
+        overlay = ADULT_AGENT_OVERLAYS.get(agent_type)
+        if overlay:
+            result += "\n" + overlay
+
+    return result
 
 
 def build_memory_from_db(
