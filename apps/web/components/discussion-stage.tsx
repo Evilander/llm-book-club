@@ -1,38 +1,32 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  Send,
-  Volume2,
-  VolumeX,
-  Quote,
-  User,
   BookOpen,
   Eye,
+  Flame,
+  Headphones,
+  LibraryBig,
+  Loader2,
+  MessageCircle,
+  Quote,
+  Send,
   Sparkles,
   StopCircle,
-  MessageCircle,
-  Loader2,
-  ChevronRight,
-  Flame,
-  Focus,
   Timer,
+  User,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { VoiceInput } from "@/components/voice-input";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { cn, API_BASE } from "@/lib/utils";
+import { VoiceInput } from "@/components/voice-input";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { API_BASE, cn } from "@/lib/utils";
 
 interface CitationData {
   chunk_id: string;
@@ -53,9 +47,21 @@ interface Message {
 
 interface Section {
   id: string;
-  title: string;
+  title: string | null;
   section_type: string;
+  order_index: number;
   reading_time_min: number | null;
+}
+
+interface SessionPreferences {
+  discussion_style?: string | null;
+  vibes?: string[];
+  voice_profile?: string | null;
+  reader_goal?: string | null;
+  experience_mode?: "audio" | "text";
+  desire_lens?: string | null;
+  adult_intensity?: string | null;
+  erotic_focus?: string | null;
 }
 
 interface SessionData {
@@ -65,6 +71,44 @@ interface SessionData {
   current_phase: string;
   sections: Section[];
   is_active: boolean;
+  preferences?: SessionPreferences | null;
+}
+
+interface ExploreSection {
+  id: string;
+  title: string | null;
+  section_type: string;
+  order_index: number;
+  reading_time_min: number | null;
+  page_start: number | null;
+  page_end: number | null;
+  preview_text: string;
+}
+
+interface ActiveSection extends ExploreSection {
+  text: string;
+  chunk_count: number;
+  source_refs: string[];
+}
+
+interface AudiobookMatch {
+  path: string;
+  filename: string;
+  extension: string;
+  size_bytes: number;
+  title_guess: string;
+  parent_folder: string | null;
+  match_score: number | null;
+  match_reason: string | null;
+}
+
+interface ExplorePayload {
+  title: string;
+  author: string | null;
+  sections: ExploreSection[];
+  active_section: ActiveSection | null;
+  audiobook_matches: AudiobookMatch[];
+  has_local_audiobook: boolean;
 }
 
 interface DiscussionStageProps {
@@ -72,6 +116,8 @@ interface DiscussionStageProps {
   onBack: () => void;
 }
 
+type SidebarView = "club" | "reader" | "audio";
+type ExperienceMode = "audio" | "text";
 type AgentRole = "facilitator" | "close_reader" | "skeptic" | "user";
 
 const agentConfig: Record<
@@ -95,7 +141,7 @@ const agentConfig: Record<
   },
   facilitator: {
     name: "Sam",
-    subtitle: "your guide",
+    subtitle: "guide",
     icon: Sparkles,
     color: "text-amber-400",
     bgColor: "bg-amber-500/10",
@@ -103,7 +149,7 @@ const agentConfig: Record<
   },
   close_reader: {
     name: "Ellis",
-    subtitle: "the reader",
+    subtitle: "close reader",
     icon: Eye,
     color: "text-teal-400",
     bgColor: "bg-teal-500/10",
@@ -111,12 +157,20 @@ const agentConfig: Record<
   },
   skeptic: {
     name: "Kit",
-    subtitle: "devil's advocate",
+    subtitle: "skeptic",
     icon: Flame,
     color: "text-rose-400",
     bgColor: "bg-rose-500/10",
     borderColor: "border-rose-500/30",
   },
+};
+
+const eroticFocusNotes: Record<string, string> = {
+  longing: "Look for almost-touch, delayed confession, and the ache of what is wanted but not yet allowed.",
+  glamour: "Look for beauty rituals, clothes, entrances, mirrors, and scenes where presentation becomes seduction.",
+  power: "Look for who controls the pace, who yields, and where desire is negotiated instead of simply declared.",
+  tenderness: "Look for caretaking, softness, reassurance, and the warmth that makes erotic tension feel intimate.",
+  transgression: "Look for secrecy, risk, taboo, and every moment where crossing the line sharpens the charge.",
 };
 
 function getAgentConfig(role: string) {
@@ -132,13 +186,12 @@ function getAgentConfig(role: string) {
   );
 }
 
-// Voice wave animation component
 function VoiceWaves({ active }: { active: boolean }) {
   return (
-    <div className="flex items-center justify-center gap-1 h-6">
-      {[...Array(5)].map((_, i) => (
+    <div className="flex h-6 items-center justify-center gap-1">
+      {[0, 1, 2, 3, 4].map((index) => (
         <div
-          key={i}
+          key={index}
           className={cn(
             "w-1 rounded-full bg-primary transition-all duration-200",
             active ? "voice-wave-bar" : "h-1"
@@ -150,144 +203,260 @@ function VoiceWaves({ active }: { active: boolean }) {
   );
 }
 
-// Typing indicator component
-function TypingIndicator({ agent }: { agent: string }) {
-  const config = getAgentConfig(agent);
-  return (
-    <div className="flex items-start gap-3 message-enter-agent">
-      <div
-        className={cn(
-          "w-9 h-9 rounded-xl flex items-center justify-center shrink-0",
-          config.bgColor
-        )}
-      >
-        <config.icon className={cn("w-4 h-4", config.color)} />
-      </div>
-      <div className={cn("rounded-2xl rounded-tl-md px-4 py-3", config.bgColor)}>
-        <div className="flex items-center gap-1.5">
-          <span className="typing-dot w-2 h-2 rounded-full bg-current opacity-60" />
-          <span className="typing-dot w-2 h-2 rounded-full bg-current opacity-60" />
-          <span className="typing-dot w-2 h-2 rounded-full bg-current opacity-60" />
-        </div>
-      </div>
-    </div>
-  );
+function citationLabel(citation: CitationData) {
+  if (citation.verified === false) {
+    return "Unverified";
+  }
+  if (citation.match_type === "exact") {
+    return "Exact";
+  }
+  if (citation.match_type === "normalized") {
+    return "Normalized";
+  }
+  if (citation.match_type === "fuzzy") {
+    return "Fuzzy";
+  }
+  return "Unchecked";
 }
 
-// Citation quality indicator
-function citationQualityInfo(cite: CitationData): {
-  color: string;
-  label: string;
-  description: string;
-} {
-  // If verified field is not present at all, treat as legacy (no verification data)
-  if (cite.verified === undefined || cite.verified === null) {
-    return {
-      color: "bg-zinc-400",
-      label: "Not checked",
-      description: "This citation has no verification data",
-    };
+function extractSpeakableSegments(buffer: string) {
+  const segments: string[] = [];
+  let remaining = buffer;
+  const sentencePattern = /(.+?[.!?](?:["')\]]+)?)(?:\s+|$)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = sentencePattern.exec(buffer)) !== null) {
+    const segment = match[1]?.trim();
+    if (segment) {
+      segments.push(segment);
+    }
+    lastIndex = sentencePattern.lastIndex;
   }
-  if (cite.verified === false) {
-    return {
-      color: "bg-red-400/80",
-      label: "Unverified",
-      description: "This quote could not be verified against the source text",
-    };
+
+  remaining = buffer.slice(lastIndex);
+  if (remaining.length > 220) {
+    const pauseIndex = Math.max(remaining.lastIndexOf(", "), remaining.lastIndexOf("; "));
+    if (pauseIndex > 80) {
+      const chunk = remaining.slice(0, pauseIndex + 1).trim();
+      if (chunk) {
+        segments.push(chunk);
+      }
+      remaining = remaining.slice(pauseIndex + 1).trimStart();
+    }
   }
-  switch (cite.match_type) {
-    case "exact":
-      return {
-        color: "bg-emerald-400",
-        label: "Exact match",
-        description: "This quote exactly matches the source text",
-      };
-    case "normalized":
-      return {
-        color: "bg-emerald-400/70",
-        label: "Normalized match",
-        description: "This quote matches the source after whitespace/unicode normalization",
-      };
-    case "fuzzy":
-      return {
-        color: "bg-amber-400",
-        label: "Fuzzy match",
-        description: "This quote partially matches the source text (word overlap)",
-      };
-    default:
-      return {
-        color: "bg-zinc-400",
-        label: "Unknown",
-        description: "Verification status is unknown",
-      };
-  }
+
+  return { segments, remaining };
 }
 
-function CitationQualityDot({ citation }: { citation: CitationData }) {
-  const quality = citationQualityInfo(citation);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={cn(
-            "inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-1.5",
-            quality.color
-          )}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top">
-        <p className="font-medium">{quality.label}</p>
-        <p className="text-muted-foreground text-[10px] max-w-[200px]">
-          {quality.description}
-        </p>
-      </TooltipContent>
-    </Tooltip>
-  );
+async function playStreamingAudio(
+  response: Response,
+  audio: HTMLAudioElement,
+  onUrl: (url: string | null) => void
+) {
+  const body = response.body;
+  if (
+    !body ||
+    typeof window === "undefined" ||
+    typeof MediaSource === "undefined" ||
+    !MediaSource.isTypeSupported("audio/mpeg")
+  ) {
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    onUrl(url);
+    audio.src = url;
+    await audio.play();
+    await new Promise<void>((resolve) => {
+      audio.onended = () => resolve();
+      audio.onerror = () => resolve();
+    });
+    return;
+  }
+
+  const mediaSource = new MediaSource();
+  const mediaUrl = URL.createObjectURL(mediaSource);
+  onUrl(mediaUrl);
+  audio.src = mediaUrl;
+
+  await new Promise<void>((resolve, reject) => {
+    mediaSource.addEventListener("sourceopen", () => resolve(), { once: true });
+    mediaSource.addEventListener("error", () => reject(new Error("media source error")), {
+      once: true,
+    });
+  });
+
+  const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+  const reader = body.getReader();
+  const queue: Uint8Array[] = [];
+  let streamDone = false;
+
+  const flushQueue = () => {
+    if (sourceBuffer.updating || queue.length === 0) {
+      return;
+    }
+    sourceBuffer.appendBuffer(queue.shift() as Uint8Array);
+  };
+
+  sourceBuffer.addEventListener("updateend", () => {
+    flushQueue();
+    if (streamDone && queue.length === 0 && !sourceBuffer.updating && mediaSource.readyState === "open") {
+      try {
+        mediaSource.endOfStream();
+      } catch {
+        // noop
+      }
+    }
+  });
+
+  await audio.play().catch(() => undefined);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      streamDone = true;
+      if (queue.length === 0 && !sourceBuffer.updating && mediaSource.readyState === "open") {
+        try {
+          mediaSource.endOfStream();
+        } catch {
+          // noop
+        }
+      }
+      break;
+    }
+    if (value) {
+      queue.push(value);
+      flushQueue();
+    }
+  }
+
+  await new Promise<void>((resolve) => {
+    audio.onended = () => resolve();
+    audio.onerror = () => resolve();
+  });
 }
 
 export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [session, setSession] = useState<SessionData | null>(null);
-  const [bookTitle, setBookTitle] = useState<string>("");
+  const [bookTitle, setBookTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [playingAudio, setPlayingAudio] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [sessionTime, setSessionTime] = useState(0);
   const [selectedCitation, setSelectedCitation] = useState<CitationData | null>(null);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [focusMode, setFocusMode] = useState(false);
-  const [sessionTime, setSessionTime] = useState(0); // seconds
+  const [sidebarView, setSidebarView] = useState<SidebarView>("club");
+  const [experienceMode, setExperienceMode] = useState<ExperienceMode>("text");
+  const [readerSectionId, setReaderSectionId] = useState<string | null>(null);
+  const [explore, setExplore] = useState<ExplorePayload | null>(null);
+  const [exploreLoading, setExploreLoading] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const startedRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioObjectUrlRef = useRef<string | null>(null);
+  const speechQueueRef = useRef<Array<{ text: string; role: string }>>([]);
+  const speechRunningRef = useRef(false);
+  const speechBuffersRef = useRef<Record<string, string>>({});
+  const abortRef = useRef<AbortController | null>(null);
 
-  // Session timer
   useEffect(() => {
     if (!loading && session?.is_active) {
-      const interval = setInterval(() => {
-        setSessionTime((prev) => prev + 1);
-      }, 1000);
+      const interval = setInterval(() => setSessionTime((value) => value + 1), 1000);
       return () => clearInterval(interval);
     }
   }, [loading, session?.is_active]);
 
-  // Format session time
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Load session data
+  const cleanupAudioUrl = useCallback(() => {
+    if (audioObjectUrlRef.current) {
+      URL.revokeObjectURL(audioObjectUrlRef.current);
+      audioObjectUrlRef.current = null;
+    }
+  }, []);
+
+  const stopAudio = useCallback(() => {
+    abortRef.current?.abort();
+    speechQueueRef.current = [];
+    speechRunningRef.current = false;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    cleanupAudioUrl();
+    setPlayingAudio(false);
+  }, [cleanupAudioUrl]);
+
+  const drainSpeechQueue = useCallback(async () => {
+    if (speechRunningRef.current) {
+      return;
+    }
+    speechRunningRef.current = true;
+
+    while (speechQueueRef.current.length > 0) {
+      const next = speechQueueRef.current.shift();
+      if (!next) {
+        continue;
+      }
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setPlayingAudio(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/v1/tts/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: next.text, voice: "nova" }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`TTS request failed: ${response.status}`);
+        }
+
+        const audio = new Audio();
+        audioRef.current = audio;
+        cleanupAudioUrl();
+        await playStreamingAudio(response, audio, (url) => {
+          audioObjectUrlRef.current = url;
+        });
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error("Streaming TTS failed:", error);
+        }
+      } finally {
+        abortRef.current = null;
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current = null;
+        }
+        cleanupAudioUrl();
+        setPlayingAudio(false);
+      }
+    }
+
+    speechRunningRef.current = false;
+  }, [cleanupAudioUrl]);
+
+  const enqueueSpeech = useCallback(
+    (text: string, role: string) => {
+      if (!text.trim()) {
+        return;
+      }
+      speechQueueRef.current.push({ text, role });
+      drainSpeechQueue();
+    },
+    [drainSpeechQueue]
+  );
+
   const loadSession = useCallback(async () => {
     try {
       const [sessionRes, messagesRes] = await Promise.all([
@@ -297,74 +466,118 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
       const sessionData = await sessionRes.json();
       const messagesData = await messagesRes.json();
       setSession(sessionData);
+      setExperienceMode(sessionData.preferences?.experience_mode || "text");
       setMessages(messagesData.messages || []);
+      setReaderSectionId((prev) => prev || sessionData.sections?.[0]?.id || null);
 
-      // Fetch book title
       if (sessionData.book_id) {
         try {
           const bookRes = await fetch(`${API_BASE}/v1/books/${sessionData.book_id}`);
           const bookData = await bookRes.json();
           setBookTitle(bookData.title || "");
         } catch {
-          // Non-critical — continue without title
+          // noop
         }
       }
 
-      // Start discussion if no messages yet (guard against React strict mode double-fire)
       if ((messagesData.messages || []).length === 0 && !startedRef.current) {
         startedRef.current = true;
-        await startDiscussion();
+        setActiveAgent("facilitator");
+        const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/start-discussion`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (data.messages) {
+          setMessages(
+            data.messages.map((message: Message, index: number) => ({
+              ...message,
+              id: message.id || `start-${Date.now()}-${index}`,
+              created_at: message.created_at || new Date().toISOString(),
+            }))
+          );
+          if (sessionData.preferences?.experience_mode === "audio" && data.messages[0]?.content) {
+            enqueueSpeech(data.messages[0].content, data.messages[0].role || "facilitator");
+          }
+        }
+        setActiveAgent(null);
       }
-    } catch (e) {
-      console.error("Failed to load session:", e);
+    } catch (error) {
+      console.error("Failed to load session:", error);
     } finally {
       setLoading(false);
     }
-  }, [sessionId]);
+  }, [enqueueSpeech, sessionId]);
 
   useEffect(() => {
     loadSession();
   }, [loadSession]);
 
-  async function startDiscussion() {
-    setActiveAgent("facilitator");
-    try {
-      const res = await fetch(
-        `${API_BASE}/v1/sessions/${sessionId}/start-discussion`,
-        { method: "POST" }
-      );
-      const data = await res.json();
-      if (data.messages) {
-        setMessages((prev) => [
-          ...prev,
-          ...data.messages.map((m: any, i: number) => ({
-            id: `new-${Date.now()}-${i}`,
-            role: m.role,
-            content: m.content,
-            citations: m.citations,
-            created_at: new Date().toISOString(),
-          })),
-        ]);
-
-        if (voiceEnabled && data.messages.length > 0) {
-          playTTS(data.messages[0].content);
-        }
+  useEffect(() => {
+    async function loadExplore() {
+      if (!session?.book_id || !readerSectionId) {
+        return;
       }
-    } catch (e) {
-      console.error("Failed to start discussion:", e);
-    } finally {
-      setActiveAgent(null);
+      setExploreLoading(true);
+      try {
+        const params = new URLSearchParams({ section_id: readerSectionId });
+        const res = await fetch(`${API_BASE}/v1/books/${session.book_id}/explore?${params}`);
+        const data = await res.json();
+        setExplore(data);
+      } catch (error) {
+        console.error("Failed to load reader explorer:", error);
+      } finally {
+        setExploreLoading(false);
+      }
+    }
+
+    loadExplore();
+  }, [readerSectionId, session?.book_id]);
+
+  useEffect(() => () => stopAudio(), [stopAudio]);
+
+  function formatTime(seconds: number) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  }
+
+  function handleVoiceTranscript(text: string) {
+    setInput((prev) => (prev ? `${prev} ${text}` : text));
+    inputRef.current?.focus();
+  }
+
+  async function updateExperienceMode(nextMode: ExperienceMode) {
+    setExperienceMode(nextMode);
+    if (nextMode === "text") {
+      stopAudio();
+    }
+    try {
+      await fetch(`${API_BASE}/v1/sessions/${sessionId}/preferences`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ experience_mode: nextMode }),
+      });
+      setSession((prev) =>
+        prev
+          ? {
+              ...prev,
+              preferences: { ...(prev.preferences || {}), experience_mode: nextMode },
+            }
+          : prev
+      );
+    } catch (error) {
+      console.error("Failed to update session preferences:", error);
     }
   }
 
   async function sendMessage() {
-    if (!input.trim() || sending) return;
+    if (!input.trim() || sending) {
+      return;
+    }
 
     const userMessage = input.trim();
     setInput("");
     setSending(true);
-
-    // Add user message immediately
     setMessages((prev) => [
       ...prev,
       {
@@ -377,61 +590,61 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     ]);
 
     try {
-      const res = await fetch(
-        `${API_BASE}/v1/sessions/${sessionId}/message/stream`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: userMessage,
-            include_close_reader: true,
-          }),
-        }
-      );
+      const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/message/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: userMessage,
+          include_close_reader: true,
+        }),
+      });
 
-      if (!res.ok) {
-        throw new Error(`Request failed: ${res.status}`);
-      }
-      if (!res.body) {
-        throw new Error("Streaming not supported");
+      if (!res.ok || !res.body) {
+        throw new Error(`Streaming failed: ${res.status}`);
       }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       const messageIds: Record<string, string> = {};
       let buffer = "";
-      let playedFirstTts = false;
       let lastSeenSequence = -1;
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        if (done) {
+          break;
+        }
 
+        buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split("\n\n");
         buffer = parts.pop() ?? "";
 
         for (const part of parts) {
-          const lines = part.split("\n").map((l) => l.trim());
-          const dataLine = lines.find((l) => l.startsWith("data: "));
-          if (!dataLine) continue;
+          const lines = part.split("\n").map((line) => line.trim());
+          const dataLine = lines.find((line) => line.startsWith("data: "));
+          if (!dataLine) {
+            continue;
+          }
 
-          const raw = dataLine.slice(6);
           let event: any;
           try {
-            event = JSON.parse(raw);
+            event = JSON.parse(dataLine.slice(6));
           } catch {
             continue;
           }
 
-          // Deduplication: skip events already seen based on sequence number
-          const seq = typeof event.sequence === "number" ? event.sequence : -1;
-          if (seq > 0 && seq <= lastSeenSequence) continue;
-          if (seq > 0) lastSeenSequence = seq;
+          const sequence = typeof event.sequence === "number" ? event.sequence : -1;
+          if (sequence > 0 && sequence <= lastSeenSequence) {
+            continue;
+          }
+          if (sequence > 0) {
+            lastSeenSequence = sequence;
+          }
 
           if (event.type === "message_start") {
             const role = String(event.role || "assistant");
             setActiveAgent(role);
+            speechBuffersRef.current[role] = "";
             const id = `stream-${Date.now()}-${role}`;
             messageIds[role] = id;
             setMessages((prev) => [
@@ -446,113 +659,80 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
             ]);
           } else if (event.type === "message_delta") {
             const role = String(event.role || "assistant");
-            const id = messageIds[role];
-            if (!id) continue;
             const delta = String(event.delta || "");
+            const id = messageIds[role];
+            if (!id) {
+              continue;
+            }
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === id ? { ...m, content: m.content + delta } : m
+              prev.map((message) =>
+                message.id === id
+                  ? { ...message, content: message.content + delta }
+                  : message
               )
             );
+            if (experienceMode === "audio" && delta) {
+              const nextBuffer = `${speechBuffersRef.current[role] || ""}${delta}`;
+              const { segments, remaining } = extractSpeakableSegments(nextBuffer);
+              speechBuffersRef.current[role] = remaining;
+              for (const segment of segments) {
+                enqueueSpeech(segment, role);
+              }
+            }
           } else if (event.type === "message_end") {
             const role = String(event.role || "assistant");
             const id = messageIds[role];
-            if (!id) continue;
             const content = String(event.content || "");
-            const citations = Array.isArray(event.citations)
-              ? event.citations
-              : null;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === id ? { ...m, content, citations } : m
-              )
-            );
-
-            if (
-              voiceEnabled &&
-              !playedFirstTts &&
-              role === "facilitator" &&
-              content
-            ) {
-              playedFirstTts = true;
-              playTTS(content);
+            const citations = Array.isArray(event.citations) ? event.citations : null;
+            if (id) {
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === id
+                    ? { ...message, content, citations }
+                    : message
+                )
+              );
             }
+            if (experienceMode === "audio") {
+              const tail = (speechBuffersRef.current[role] || content).trim();
+              if (tail) {
+                enqueueSpeech(tail, role);
+              }
+            }
+            delete speechBuffersRef.current[role];
           } else if (event.type === "agent_error") {
             const role = String(event.role || "assistant");
             const id = messageIds[role];
             if (id) {
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === id
+                prev.map((message) =>
+                  message.id === id
                     ? {
-                        ...m,
-                        content: `[Agent encountered an error: ${event.error}]`,
+                        ...message,
+                        content: `[Agent error: ${event.error}]`,
                       }
-                    : m
+                    : message
                 )
               );
             }
           } else if (event.type === "done") {
             setActiveAgent(null);
-          } else if (event.type === "error") {
-            console.error("Streaming error:", event.error);
           }
         }
       }
-    } catch (e) {
-      console.error("Failed to send message:", e);
+    } catch (error) {
+      console.error("Failed to send message:", error);
     } finally {
       setSending(false);
       setActiveAgent(null);
     }
   }
 
-  async function playTTS(text: string) {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-
-    setPlayingAudio(true);
-    try {
-      const res = await fetch(`${API_BASE}/v1/tts/synthesize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: "nova" }),
-      });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.onended = () => {
-        setPlayingAudio(false);
-        URL.revokeObjectURL(url);
-      };
-      audio.play();
-    } catch (e) {
-      console.error("TTS failed:", e);
-      setPlayingAudio(false);
-    }
-  }
-
-  function stopAudio() {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    setPlayingAudio(false);
-  }
-
-  // Handle voice transcript - append to input
-  function handleVoiceTranscript(text: string) {
-    setInput((prev) => (prev ? `${prev} ${text}` : text));
-    inputRef.current?.focus();
-  }
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 mx-auto animate-spin text-primary mb-4" />
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-primary" />
           <p className="text-muted-foreground">Loading discussion...</p>
         </div>
       </div>
@@ -560,424 +740,494 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   }
 
   return (
-    <TooltipProvider delayDuration={300}>
-    <div className={cn("h-full flex relative", focusMode && "focus-mode-active")}>
-      {/* Focus mode overlay */}
-      {focusMode && (
-        <div className="absolute inset-0 pointer-events-none z-10">
-          <div className="absolute inset-0 bg-gradient-radial from-transparent via-transparent to-background/80" />
-        </div>
-      )}
-
-      {/* Main chat area */}
-      <div className={cn("flex-1 flex flex-col min-w-0 z-20", focusMode && "relative")}>
-        {/* Header */}
+    <div className="flex h-full min-w-0">
+      <div className="flex min-w-0 flex-1 flex-col">
         <div className="glass border-b border-border/50 px-4 py-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={onBack}
-                className="shrink-0"
-              >
-                <ArrowLeft className="w-4 h-4" />
+              <Button variant="ghost" size="icon-sm" onClick={onBack}>
+                <ArrowLeft className="h-4 w-4" />
               </Button>
               <div>
-                <h2 className="font-semibold text-sm">
-                  {bookTitle || "Reading Together"}
-                </h2>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>with Sam, Ellis & Kit</span>
+                <h2 className="text-sm font-semibold">{bookTitle || "Reading session"}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{session?.mode.replace("_", " ")}</Badge>
+                  {session?.preferences?.discussion_style ? (
+                    <Badge variant="default">
+                      {session.preferences.discussion_style.replace("_", " ")}
+                    </Badge>
+                  ) : null}
+                  {session?.preferences?.reader_goal ? (
+                    <Badge variant="outline">{session.preferences.reader_goal}</Badge>
+                  ) : null}
+                  {session?.preferences?.desire_lens ? (
+                    <Badge variant="outline">
+                      {session.preferences.desire_lens.replace("_", " ")}
+                    </Badge>
+                  ) : null}
+                  {session?.preferences?.adult_intensity ? (
+                    <Badge variant="outline">
+                      {session.preferences.adult_intensity.replace("_", " ")}
+                    </Badge>
+                  ) : null}
+                  {session?.preferences?.erotic_focus ? (
+                    <Badge variant="outline">
+                      {session.preferences.erotic_focus.replace("_", " ")}
+                    </Badge>
+                  ) : null}
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Session timer */}
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-secondary/50 text-xs text-muted-foreground">
-                <Timer className="w-3 h-3" />
+              <div className="flex items-center gap-1 rounded-lg bg-secondary/50 px-2 py-1 text-xs text-muted-foreground">
+                <Timer className="h-3 w-3" />
                 <span className="font-mono">{formatTime(sessionTime)}</span>
               </div>
 
-              {/* Focus mode toggle */}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setFocusMode(!focusMode)}
-                className={cn(
-                  "h-7 w-7",
-                  focusMode && "bg-purple-500/20 text-purple-400"
-                )}
-                title={focusMode ? "Exit focus mode" : "Enter focus mode"}
-              >
-                <Focus className="w-3.5 h-3.5" />
-              </Button>
+              <div className="flex items-center rounded-xl border border-white/10 bg-black/10 p-1">
+                <button
+                  type="button"
+                  onClick={() => updateExperienceMode("audio")}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-xs transition-colors",
+                    experienceMode === "audio" && "bg-primary text-primary-foreground"
+                  )}
+                >
+                  Conversational audio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateExperienceMode("text")}
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-xs transition-colors",
+                    experienceMode === "text" && "bg-primary text-primary-foreground"
+                  )}
+                >
+                  Text
+                </button>
+              </div>
 
-              {/* Voice controls */}
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-secondary/50">
+              {playingAudio ? (
+                <Button variant="ghost" size="icon-sm" onClick={stopAudio}>
+                  <StopCircle className="h-4 w-4 text-destructive" />
+                </Button>
+              ) : (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => setVoiceEnabled(!voiceEnabled)}
-                  className={cn(
-                    "h-7 w-7",
-                    voiceEnabled && "bg-primary/20 text-primary"
-                  )}
+                  onClick={() => setSidebarView("audio")}
                 >
-                  {voiceEnabled ? (
-                    <Volume2 className="w-3.5 h-3.5" />
-                  ) : (
-                    <VolumeX className="w-3.5 h-3.5" />
-                  )}
+                  <Headphones className="h-4 w-4" />
                 </Button>
-                {playingAudio && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={stopAudio}
-                    className="h-7 w-7 text-destructive"
-                  >
-                    <StopCircle className="w-3.5 h-3.5" />
-                  </Button>
-                )}
-              </div>
-
-              {/* Toggle sidebar on mobile */}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setShowSidebar(!showSidebar)}
-                className="lg:hidden"
-              >
-                <BookOpen className="w-4 h-4" />
-              </Button>
+              )}
             </div>
           </div>
 
-          {/* Voice activity indicator */}
-          {playingAudio && (
+          {experienceMode === "audio" ? (
             <div className="mt-2 flex items-center gap-2 text-xs text-primary">
-              <VoiceWaves active={true} />
-              <span>Speaking...</span>
+              <VoiceWaves active={playingAudio || sending} />
+              <span>
+                {playingAudio
+                  ? "Conversation audio is speaking the live stream."
+                  : "New agent turns will start speaking sentence by sentence."}
+              </span>
             </div>
-          )}
+          ) : null}
+
+          {session?.preferences?.discussion_style === "sexy" ? (
+            <div className="mt-3 rounded-2xl border border-rose-500/20 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.16),transparent_35%),rgba(20,16,22,0.92)] px-4 py-3 text-sm text-rose-50/90">
+              <p className="font-medium text-white">After-dark reading room</p>
+              <p className="mt-1 leading-6 text-rose-50/80">
+                This session is tuned for adult, erotic conversation through a{" "}
+                {session.preferences.desire_lens?.replace("_", " ") || "sexy"} lens with a{" "}
+                {session.preferences.adult_intensity?.replace("_", " ") || "frank"} tone.
+                Stay with the charged details that make the page hard to skim.
+              </p>
+            </div>
+          ) : null}
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((msg, index) => {
-            const config = getAgentConfig(msg.role);
-            const isUser = msg.role === "user";
-            const Icon = config.icon;
+        <div className="flex-1 overflow-y-auto px-4 py-5">
+          <div className="mx-auto max-w-4xl space-y-4">
+            {messages.map((message) => {
+              const config = getAgentConfig(message.role);
+              const isUser = message.role === "user";
+              const Icon = config.icon;
+              return (
+                <div key={message.id} className={cn("flex gap-3", isUser && "flex-row-reverse")}>
+                  <div
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
+                      config.bgColor
+                    )}
+                  >
+                    <Icon className={cn("h-4 w-4", config.color)} />
+                  </div>
 
-            return (
-              <div
-                key={msg.id}
-                className={cn(
-                  "flex gap-3",
-                  isUser ? "flex-row-reverse message-enter-user" : "message-enter-agent"
-                )}
-                style={{ animationDelay: `${index * 50}ms` }}
-              >
-                {/* Avatar */}
-                <div
-                  className={cn(
-                    "w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-all",
-                    config.bgColor,
-                    msg.id.startsWith("stream-") && "animate-pulse-glow"
-                  )}
-                >
-                  <Icon className={cn("w-4 h-4", config.color)} />
-                </div>
-
-                {/* Message bubble */}
-                <div
-                  className={cn(
-                    "max-w-[80%] rounded-2xl px-4 py-3 transition-all",
-                    isUser
-                      ? "rounded-tr-md bg-primary text-primary-foreground"
-                      : `rounded-tl-md ${config.bgColor} border ${config.borderColor}`
-                  )}
-                >
-                  {/* Agent name */}
-                  {!isUser && (
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className={cn("text-xs font-medium", config.color)}>
-                        {config.name}
-                      </span>
-                      {config.subtitle && (
-                        <span className="text-[10px] text-muted-foreground opacity-60">
+                  <div
+                    className={cn(
+                      "max-w-[84%] rounded-3xl px-4 py-3",
+                      isUser
+                        ? "rounded-tr-md bg-primary text-primary-foreground"
+                        : `rounded-tl-md border ${config.borderColor} ${config.bgColor}`
+                    )}
+                  >
+                    {!isUser ? (
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <span className={cn("text-xs font-medium", config.color)}>
+                          {config.name}
+                        </span>
+                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                           {config.subtitle}
                         </span>
-                      )}
-                      {voiceEnabled && msg.content && (
                         <button
-                          onClick={() => playTTS(msg.content)}
-                          className="opacity-50 hover:opacity-100 transition-opacity"
+                          type="button"
+                          onClick={() => enqueueSpeech(message.content, message.role)}
+                          className="opacity-60 transition-opacity hover:opacity-100"
                         >
-                          <Volume2 className="w-3 h-3" />
+                          <Volume2 className="h-3.5 w-3.5" />
                         </button>
-                      )}
-                    </div>
-                  )}
+                      </div>
+                    ) : null}
 
-                  {/* Content */}
-                  {msg.content ? (
-                    <div className="text-sm leading-relaxed prose prose-sm prose-invert max-w-none prose-p:my-1.5 prose-li:my-0.5 prose-headings:my-2 prose-pre:bg-black/20 prose-pre:text-xs prose-code:text-xs prose-code:bg-black/20 prose-code:px-1 prose-code:py-0.5 prose-code:rounded">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {msg.content}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <p className="text-sm opacity-50 italic">Thinking...</p>
-                  )}
+                    {message.content ? (
+                      <div className="prose prose-sm prose-invert max-w-none text-sm leading-relaxed prose-p:my-1.5">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="text-sm italic opacity-60">Thinking...</p>
+                    )}
 
-                  {/* Citations */}
-                  {msg.citations && msg.citations.length > 0 && (() => {
-                    const validCitations = msg.citations.filter(
-                      (c) => c.verified !== false
-                    );
-                    const invalidCount = msg.citations.length - validCitations.length;
-                    const displayCitations = msg.citations;
-
-                    return (
-                      <div className="mt-3 pt-3 border-t border-current/10">
-                        <p className="text-xs font-medium opacity-70 mb-2 flex items-center gap-1">
-                          <Quote className="w-3 h-3" />
+                    {message.citations?.length ? (
+                      <div className="mt-3 border-t border-current/10 pt-3">
+                        <p className="mb-2 flex items-center gap-1 text-xs font-medium opacity-70">
+                          <Quote className="h-3 w-3" />
                           Citations
                         </p>
                         <div className="space-y-1.5">
-                          {displayCitations.map((cite, i) => {
-                            const isUnverified = cite.verified === false;
-                            return (
-                              <button
-                                key={i}
+                          {message.citations.map((citation, index) => (
+                            <button
+                              key={`${message.id}-${index}`}
+                              type="button"
+                              onClick={() => {
+                                setSelectedCitation(citation);
+                                setSidebarView("club");
+                              }}
+                              className="flex w-full items-start gap-2 rounded-xl px-2 py-1 text-left text-xs transition-colors hover:bg-black/10"
+                            >
+                              <span
                                 className={cn(
-                                  "flex items-start gap-2 text-left text-xs transition-opacity group",
-                                  isUnverified
-                                    ? "opacity-40 hover:opacity-60"
-                                    : "opacity-70 hover:opacity-100"
+                                  "mt-1 inline-block h-2 w-2 shrink-0 rounded-full",
+                                  citation.verified === false
+                                    ? "bg-red-400"
+                                    : citation.match_type === "exact"
+                                      ? "bg-emerald-400"
+                                      : "bg-amber-400"
                                 )}
-                                onClick={() => setSelectedCitation(cite)}
-                              >
-                                <CitationQualityDot citation={cite} />
-                                <ChevronRight className="w-3 h-3 mt-0.5 shrink-0 group-hover:translate-x-0.5 transition-transform" />
-                                <span
-                                  className={cn(
-                                    "line-clamp-2 italic",
-                                    isUnverified && "line-through decoration-current/30"
-                                  )}
-                                >
-                                  &ldquo;{cite.text}&rdquo;
+                              />
+                              <span className="line-clamp-2 italic">
+                                "{citation.text}"{" "}
+                                <span className="not-italic text-muted-foreground">
+                                  {citationLabel(citation)}
                                 </span>
-                              </button>
-                            );
-                          })}
+                              </span>
+                            </button>
+                          ))}
                         </div>
-                        {invalidCount > 0 && (
-                          <p className="text-[10px] text-muted-foreground mt-2 opacity-60">
-                            {invalidCount} citation{invalidCount > 1 ? "s" : ""} could not be verified against the source text
-                          </p>
-                        )}
                       </div>
-                    );
-                  })()}
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+
+            {activeAgent ? (
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                </div>
+                <div className="rounded-3xl rounded-tl-md border border-white/10 bg-black/10 px-4 py-3 text-sm text-muted-foreground">
+                  {getAgentConfig(activeAgent).name} is composing a reply...
                 </div>
               </div>
-            );
-          })}
+            ) : null}
 
-          {/* Typing indicator */}
-          {activeAgent && <TypingIndicator agent={activeAgent} />}
-
-          <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
-        {/* Input area */}
-        <div className="p-4 border-t border-border/50 glass">
+        <div className="glass border-t border-border/50 p-4">
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
+            onSubmit={(event) => {
+              event.preventDefault();
               sendMessage();
             }}
-            className="flex items-center gap-2"
+            className="mx-auto flex max-w-4xl items-center gap-2"
           >
-            {/* Voice input button */}
             <VoiceInput
               onTranscript={handleVoiceTranscript}
               onListeningChange={setIsListening}
               disabled={sending || !session?.is_active}
             />
-
-            {/* Text input */}
             <Input
               ref={inputRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="What do you think? What caught your eye?"
+              onChange={(event) => setInput(event.target.value)}
+              placeholder={
+                experienceMode === "audio"
+                  ? "Jump into the conversation..."
+                  : "What do you think? What caught your eye?"
+              }
               disabled={sending || !session?.is_active}
               className="flex-1"
             />
-
-            {/* Send button */}
-            <Button
-              type="submit"
-              disabled={sending || !input.trim()}
-              className={cn(
-                "shrink-0 transition-all",
-                input.trim() && "shadow-glow"
-              )}
-            >
-              {sending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
+            <Button type="submit" disabled={sending || !input.trim()}>
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </form>
-
-          {/* Voice listening indicator */}
-          {isListening && (
+          {isListening ? (
             <div className="mt-2 flex items-center justify-center gap-2 text-xs text-red-400">
-              <VoiceWaves active={true} />
+              <VoiceWaves active />
               <span>Listening...</span>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
-      {/* Sidebar */}
-      <div
-        className={cn(
-          "w-80 border-l border-border/50 glass flex-col hidden lg:flex transition-all duration-300",
-          showSidebar ? "flex" : "hidden",
-          focusMode && "opacity-30 pointer-events-none"
-        )}
-      >
-        {/* Reading slice */}
-        <div className="p-4 border-b border-border/50">
-          <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-primary" />
-            Reading Slice
-          </h3>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
-            {session?.sections.map((section) => (
-              <Card key={section.id} className="p-2.5 bg-secondary/30">
-                <p className="font-medium text-xs line-clamp-1">
-                  {section.title || "Untitled"}
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {section.section_type} • ~{section.reading_time_min || 5} min
-                </p>
-              </Card>
-            ))}
+      <aside className="glass hidden w-[360px] border-l border-border/50 lg:flex lg:flex-col">
+        <div className="border-b border-white/10 p-3">
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              variant={sidebarView === "club" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSidebarView("club")}
+            >
+              Club
+            </Button>
+            <Button
+              variant={sidebarView === "reader" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSidebarView("reader")}
+            >
+              Reader
+            </Button>
+            <Button
+              variant={sidebarView === "audio" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSidebarView("audio")}
+            >
+              Audio
+            </Button>
           </div>
         </div>
 
-        {/* Selected citation */}
-        {selectedCitation && (() => {
-          const quality = citationQualityInfo(selectedCitation);
-          const isUnverified = selectedCitation.verified === false;
-          return (
-            <div className="p-4 border-b border-border/50">
-              <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                <Quote className="w-4 h-4 text-primary" />
-                Selected Citation
-              </h3>
-              <Card
-                className={cn(
-                  "p-3",
-                  isUnverified
-                    ? "bg-red-500/5 border-red-500/20 border-dashed"
-                    : "bg-primary/5 border-primary/20"
-                )}
-              >
-                <p
-                  className={cn(
-                    "text-sm italic leading-relaxed",
-                    isUnverified && "opacity-60"
-                  )}
-                >
-                  &ldquo;{selectedCitation.text}&rdquo;
-                </p>
-                <div className="flex items-center gap-2 mt-2">
-                  <span
-                    className={cn(
-                      "inline-block w-2 h-2 rounded-full",
-                      quality.color
-                    )}
-                  />
-                  <span className="text-[10px] text-muted-foreground">
-                    {quality.label}
-                  </span>
+        <div className="flex-1 overflow-y-auto p-4">
+          {sidebarView === "club" ? (
+            <div className="space-y-5">
+              {session?.preferences?.discussion_style === "sexy" ? (
+                <Card className="border-rose-500/20 bg-rose-500/5">
+                  <CardContent className="p-4">
+                    <p className="text-sm font-medium text-rose-100">What to notice</p>
+                    <p className="mt-2 text-sm leading-6 text-rose-50/75">
+                      {eroticFocusNotes[session.preferences.erotic_focus || "longing"]}
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : null}
+
+              <div>
+                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <LibraryBig className="h-4 w-4 text-primary" />
+                  Reading slice
+                </h3>
+                <div className="space-y-2">
+                  {session?.sections.map((section) => (
+                    <Card
+                      key={section.id}
+                      className="cursor-pointer border-white/10 bg-black/10"
+                      onClick={() => {
+                        setReaderSectionId(section.id);
+                        setSidebarView("reader");
+                      }}
+                    >
+                      <CardContent className="p-3">
+                        <p className="text-sm font-medium">
+                          {section.title || `Section ${section.order_index + 1}`}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {section.section_type}
+                          {section.reading_time_min ? ` · ${section.reading_time_min} min` : ""}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Chunk: {selectedCitation.chunk_id.slice(0, 12)}...
-                  {selectedCitation.char_start != null &&
-                    selectedCitation.char_end != null && (
-                      <span className="ml-1">
-                        (chars {selectedCitation.char_start}&ndash;{selectedCitation.char_end})
-                      </span>
-                    )}
-                </p>
-              </Card>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full mt-2 text-xs"
-                onClick={() => setSelectedCitation(null)}
-              >
-                Clear selection
-              </Button>
+              </div>
+
+              {selectedCitation ? (
+                <div>
+                  <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <Quote className="h-4 w-4 text-primary" />
+                    Selected citation
+                  </h3>
+                  <Card className="border-white/10 bg-primary/5">
+                    <CardContent className="p-4">
+                      <p className="text-sm italic">&quot;{selectedCitation.text}&quot;</p>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        {selectedCitation.chunk_id.slice(0, 12)}...
+                        {selectedCitation.char_start != null && selectedCitation.char_end != null
+                          ? ` · chars ${selectedCitation.char_start}-${selectedCitation.char_end}`
+                          : ""}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : null}
+
+              <div>
+                <h3 className="mb-3 text-sm font-semibold">Book club voices</h3>
+                <div className="space-y-2">
+                  {(["facilitator", "close_reader", "skeptic"] as const).map((role) => {
+                    const config = agentConfig[role];
+                    const Icon = config.icon;
+                    return (
+                      <div
+                        key={role}
+                        className={cn(
+                          "flex items-center gap-3 rounded-2xl border border-white/10 px-3 py-3",
+                          activeAgent === role && config.bgColor
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-xl",
+                            config.bgColor
+                          )}
+                        >
+                          <Icon className={cn("h-4 w-4", config.color)} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{config.name}</p>
+                          <p className="text-xs text-muted-foreground">{config.subtitle}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          );
-        })()}
+          ) : null}
 
-        {/* Agent presence */}
-        <div className="p-4 flex-1">
-          <h3 className="font-semibold text-sm mb-3">Your Book Club</h3>
-          <div className="space-y-2">
-            {(["facilitator", "close_reader", "skeptic"] as const).map(
-              (role) => {
-                const config = agentConfig[role];
-                const Icon = config.icon;
-                const isActive = activeAgent === role;
-
-                return (
-                  <div
-                    key={role}
-                    className={cn(
-                      "flex items-center gap-3 p-2 rounded-lg transition-all",
-                      isActive ? config.bgColor : "opacity-50"
-                    )}
-                  >
-                    <div
+          {sidebarView === "reader" ? (
+            <div className="space-y-4">
+              <div>
+                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <BookOpen className="h-4 w-4 text-primary" />
+                  Open book
+                </h3>
+                <div className="space-y-2">
+                  {explore?.sections.map((section) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => setReaderSectionId(section.id)}
                       className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center",
-                        config.bgColor,
-                        isActive && "animate-pulse"
+                        "w-full rounded-2xl border px-3 py-3 text-left transition-colors",
+                        readerSectionId === section.id
+                          ? "border-primary/50 bg-primary/10"
+                          : "border-white/10 bg-black/10 hover:border-primary/30"
                       )}
                     >
-                      <Icon className={cn("w-4 h-4", config.color)} />
+                      <p className="text-sm font-medium">
+                        {section.title || `Section ${section.order_index + 1}`}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {section.preview_text}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <Card className="border-white/10 bg-black/10">
+                <CardContent className="p-4">
+                  {exploreLoading ? (
+                    <div className="py-8 text-center text-sm text-muted-foreground">
+                      <Loader2 className="mx-auto mb-3 h-5 w-5 animate-spin text-primary" />
+                      Loading section text...
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium">{config.name}</p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {isActive ? "Thinking..." : config.subtitle || "Ready"}
+                  ) : (
+                    <>
+                      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                        {explore?.active_section?.title || "Section preview"}
+                      </p>
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/90">
+                        {explore?.active_section?.text || "Pick a section to open the text here."}
+                      </p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          ) : null}
+
+          {sidebarView === "audio" ? (
+            <div className="space-y-4">
+              <Card className="border-white/10 bg-black/10">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Experience mode</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Option A starts TTS while agent text is still streaming. Option B keeps it purely textual.
                       </p>
                     </div>
-                    {isActive && (
-                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                    {experienceMode === "audio" ? (
+                      <Volume2 className="h-4 w-4 text-primary" />
+                    ) : (
+                      <VolumeX className="h-4 w-4 text-muted-foreground" />
                     )}
                   </div>
-                );
-              }
-            )}
-          </div>
+                </CardContent>
+              </Card>
+
+              <div>
+                <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                  <Headphones className="h-4 w-4 text-primary" />
+                  Local audiobook matches
+                </h3>
+                <div className="space-y-2">
+                  {explore?.audiobook_matches?.length ? (
+                    explore.audiobook_matches.map((match) => (
+                      <Card key={match.path} className="border-white/10 bg-black/10">
+                        <CardContent className="p-3">
+                          <p className="text-sm font-medium">{match.title_guess}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {match.match_reason || "Likely local match"}
+                          </p>
+                          <p className="mt-2 text-[11px] text-muted-foreground">
+                            {match.parent_folder || match.filename}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    ))
+                  ) : (
+                    <Card className="border-dashed border-white/10 bg-black/10">
+                      <CardContent className="p-4 text-sm text-muted-foreground">
+                        No local audiobook surfaced for this title yet. The app will still
+                        run in conversational audio mode using live TTS.
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
-      </div>
+      </aside>
     </div>
-    </TooltipProvider>
   );
 }

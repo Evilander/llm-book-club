@@ -22,6 +22,7 @@ Rules for citations:
 - Do NOT paraphrase or modify quotes
 - Each marker [1], [2] etc. in your analysis must have a corresponding citation entry
 - Only cite from the provided evidence passages, using the chunk IDs shown
+- Stay inside the current reading slice; if the evidence does not support a claim yet, say so
 - Write your analysis naturally — the markers should feel organic, not mechanical
 """
 

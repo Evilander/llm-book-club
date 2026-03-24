@@ -82,6 +82,7 @@ async def ingest_book(
         file_type=file_type,
         file_size_bytes=len(data),
         ingest_status=IngestStatus.QUEUED,
+        metadata_json={"ingest_source": "upload"},
     )
     db.add(book)
     db.commit()

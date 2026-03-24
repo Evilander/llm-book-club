@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # Local books directory for filesystem browsing
     books_dir: str | None = Field(None, alias="BOOKS_DIR")
+    audiobooks_dir: str | None = Field(None, alias="AUDIOBOOKS_DIR")
 
     cors_origins: str = Field("http://localhost:3000", alias="CORS_ORIGINS")  # comma-separated
     rate_limit_default: str = Field("60/minute", alias="RATE_LIMIT_DEFAULT")
