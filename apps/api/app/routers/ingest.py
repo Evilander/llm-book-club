@@ -1,10 +1,11 @@
 """Book ingestion endpoints."""
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel
 
 from ..settings import settings
-from ..db import get_db, Book, IngestStatus
+from ..db import get_db, Book, IngestStatus, Section, DiscussionSession
 from ..worker import enqueue_ingestion
 from ..rate_limit import limiter
 
@@ -30,6 +31,11 @@ class BookResponse(BaseModel):
     ingest_status: str
     ingest_error: str | None
     created_at: str
+    # Enriched metadata for library browse
+    section_count: int = 0
+    session_count: int = 0
+    last_session_at: str | None = None
+    has_audiobook: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -106,10 +112,54 @@ def list_books(
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    """List all books in the library."""
+    """List all books in the library with enriched metadata for browse."""
     query = db.query(Book).order_by(Book.created_at.desc())
     total = query.count()
     books = query.offset(skip).limit(limit).all()
+
+    book_ids = [b.id for b in books]
+
+    # Batch-fetch section counts
+    section_counts: dict[str, int] = {}
+    if book_ids:
+        rows = (
+            db.query(Section.book_id, func.count(Section.id))
+            .filter(Section.book_id.in_(book_ids))
+            .group_by(Section.book_id)
+            .all()
+        )
+        section_counts = {bid: cnt for bid, cnt in rows}
+
+    # Batch-fetch session counts and last session dates
+    session_counts: dict[str, int] = {}
+    last_session_dates: dict[str, str] = {}
+    if book_ids:
+        rows = (
+            db.query(
+                DiscussionSession.book_id,
+                func.count(DiscussionSession.id),
+                func.max(DiscussionSession.created_at),
+            )
+            .filter(DiscussionSession.book_id.in_(book_ids))
+            .group_by(DiscussionSession.book_id)
+            .all()
+        )
+        for bid, cnt, last_dt in rows:
+            session_counts[bid] = cnt
+            if last_dt:
+                last_session_dates[bid] = last_dt.isoformat()
+
+    # Check audiobook availability
+    has_audiobook: dict[str, bool] = {}
+    if settings.audiobooks_dir:
+        try:
+            from ..services.media_library import match_audiobooks_for_book
+            for b in books:
+                if b.ingest_status == IngestStatus.COMPLETED:
+                    matches = match_audiobooks_for_book(b.title, b.author)
+                    has_audiobook[b.id] = len(matches) > 0
+        except Exception:
+            pass  # Graceful degradation if audiobook matching fails
 
     return BookListResponse(
         books=[
@@ -124,6 +174,10 @@ def list_books(
                 ingest_status=b.ingest_status.value,
                 ingest_error=b.ingest_error,
                 created_at=b.created_at.isoformat(),
+                section_count=section_counts.get(b.id, 0),
+                session_count=session_counts.get(b.id, 0),
+                last_session_at=last_session_dates.get(b.id),
+                has_audiobook=has_audiobook.get(b.id, False),
             )
             for b in books
         ],
