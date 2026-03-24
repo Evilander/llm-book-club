@@ -17,6 +17,9 @@ import {
   Plus,
   ArrowRight,
   ChevronDown,
+  Headphones,
+  MessageCircle,
+  PlayCircle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,10 @@ interface IngestedBook {
   ingest_status: string;
   ingest_error: string | null;
   created_at: string;
+  section_count: number;
+  session_count: number;
+  last_session_at: string | null;
+  has_audiobook: boolean;
 }
 
 interface LocalBook {
@@ -65,6 +72,21 @@ const EXT_FILTERS: { label: string; value: ExtFilter }[] = [
 ];
 
 // ── Helpers ────────────────────────────────────
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
 
 function getBookGradient(seed: string): string {
   const gradients = [
@@ -325,6 +347,19 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
   const pendingBooks = filteredIngested.filter((b) => b.ingest_status !== "completed");
   const hasMore = localBooks.length < localTotal;
 
+  // "Continue Reading" — books with sessions, sorted by most recent session
+  const continueReading = readyBooks
+    .filter((b) => b.session_count > 0 && b.last_session_at)
+    .sort((a, b) => {
+      const ta = a.last_session_at ? new Date(a.last_session_at).getTime() : 0;
+      const tb = b.last_session_at ? new Date(b.last_session_at).getTime() : 0;
+      return tb - ta;
+    })
+    .slice(0, 4);
+
+  // "Start Something New" — ready books with no sessions yet
+  const freshBooks = readyBooks.filter((b) => b.session_count === 0);
+
   // ── Render ──
 
   return (
@@ -407,16 +442,76 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
           <p className="text-sm text-muted-foreground mt-2">Loading your shelf...</p>
         </div>
       ) : filteredIngested.length > 0 ? (
-        <div>
+        <div className="space-y-8">
+          {/* Continue Reading */}
+          {continueReading.length > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                <PlayCircle className="w-5 h-5 text-primary" />
+                Continue Reading
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {continueReading.map((book) => (
+                  <Card
+                    key={`continue-${book.id}`}
+                    className="group relative overflow-hidden cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:border-primary/50 hover:shadow-glow"
+                    onClick={() => onSelectBook(book.id)}
+                  >
+                    <div
+                      className={cn(
+                        "absolute inset-0 bg-gradient-to-br opacity-30 group-hover:opacity-50 transition-opacity",
+                        getBookGradient(book.title)
+                      )}
+                    />
+                    <CardContent className="relative p-4 flex items-center gap-4">
+                      <BookCover title={book.title} ext={book.file_type} />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-sm line-clamp-1 group-hover:text-primary transition-colors">
+                          {book.title}
+                        </h4>
+                        {book.author && (
+                          <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{book.author}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <MessageCircle className="w-3 h-3" />
+                            {book.session_count} {book.session_count === 1 ? "session" : "sessions"}
+                          </span>
+                          {book.last_session_at && (
+                            <>
+                              <span className="text-border">·</span>
+                              <span>{timeAgo(book.last_session_at)}</span>
+                            </>
+                          )}
+                          {book.has_audiobook && (
+                            <>
+                              <span className="text-border">·</span>
+                              <span className="flex items-center gap-1">
+                                <Headphones className="w-3 h-3" /> Audio
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <ArrowRight className="w-4 h-4 text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ready to Discuss (all books) */}
+          <div>
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary" />
-            Ready to Discuss
-            <Badge variant="outline" className="ml-1">{readyBooks.length}</Badge>
+            {freshBooks.length > 0 && continueReading.length > 0 ? "Start Something New" : "Ready to Discuss"}
+            <Badge variant="outline" className="ml-1">{freshBooks.length > 0 && continueReading.length > 0 ? freshBooks.length : readyBooks.length}</Badge>
           </h3>
 
-          {readyBooks.length > 0 && (
+          {(freshBooks.length > 0 && continueReading.length > 0 ? freshBooks : readyBooks).length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {readyBooks.map((book, i) => (
+              {(freshBooks.length > 0 && continueReading.length > 0 ? freshBooks : readyBooks).map((book, i) => (
                 <Card
                   key={book.id}
                   className={cn(
@@ -458,9 +553,27 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
                               </span>
                             </>
                           )}
+                          {book.section_count > 0 && (
+                            <>
+                              <span className="text-border">·</span>
+                              <span>{book.section_count} sections</span>
+                            </>
+                          )}
                         </div>
                         <div className="mt-2 flex items-center gap-2">
                           {statusBadge(book.ingest_status)}
+                          {book.session_count > 0 && (
+                            <Badge variant="outline" className="gap-1 text-[10px]">
+                              <MessageCircle className="w-2.5 h-2.5" />
+                              {book.session_count} {book.session_count === 1 ? "session" : "sessions"}
+                            </Badge>
+                          )}
+                          {book.has_audiobook && (
+                            <Badge variant="outline" className="gap-1 text-[10px]">
+                              <Headphones className="w-2.5 h-2.5" />
+                              Audio
+                            </Badge>
+                          )}
                           <ArrowRight className="w-3.5 h-3.5 text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
                         </div>
                       </div>
@@ -499,6 +612,7 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
               ))}
             </div>
           )}
+          </div>
         </div>
       ) : !search ? (
         <div className="text-center py-10">
