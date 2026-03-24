@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from ..providers.tts.factory import get_tts_client
 from ..providers.tts.base import TTSRequest
+from ..discussion.engine import AGENT_VOICES
 
 router = APIRouter(tags=["tts"])
 
@@ -101,3 +102,24 @@ def list_voices(provider: str | None = Query(None)):
         return {"provider": provider, "voices": voices.get(provider, [])}
 
     return {"voices": voices}
+
+
+@router.get("/tts/agent-voices")
+def get_agent_voices():
+    """Return the per-agent voice mapping used in discussion streaming.
+
+    The frontend can use this to pre-configure TTS voices for each agent.
+    The same mapping is also sent in ``message_start`` and ``sentence_ready``
+    SSE events during discussion streaming.
+    """
+    return {
+        "agent_voices": AGENT_VOICES,
+        "agents": {
+            role: {"voice": voice, "display_name": name}
+            for role, voice, name in [
+                ("facilitator", AGENT_VOICES["facilitator"], "Sam"),
+                ("close_reader", AGENT_VOICES["close_reader"], "Ellis"),
+                ("skeptic", AGENT_VOICES["skeptic"], "Kit"),
+            ]
+        },
+    }

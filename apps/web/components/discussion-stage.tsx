@@ -344,6 +344,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [sending, setSending] = useState(false);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [playingAudio, setPlayingAudio] = useState(false);
+  const [speakingAgent, setSpeakingAgent] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [sessionTime, setSessionTime] = useState(0);
   const [selectedCitation, setSelectedCitation] = useState<CitationData | null>(null);
@@ -358,7 +359,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const startedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioObjectUrlRef = useRef<string | null>(null);
-  const speechQueueRef = useRef<Array<{ text: string; role: string }>>([]);
+  const speechQueueRef = useRef<Array<{ text: string; role: string; voice: string }>>([]);
   const speechRunningRef = useRef(false);
   const speechBuffersRef = useRef<Record<string, string>>({});
   const abortRef = useRef<AbortController | null>(null);
@@ -392,6 +393,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     }
     cleanupAudioUrl();
     setPlayingAudio(false);
+    setSpeakingAgent(null);
   }, [cleanupAudioUrl]);
 
   const drainSpeechQueue = useCallback(async () => {
@@ -409,12 +411,13 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
       const controller = new AbortController();
       abortRef.current = controller;
       setPlayingAudio(true);
+      setSpeakingAgent(next.role);
 
       try {
         const response = await fetch(`${API_BASE}/v1/tts/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: next.text, voice: "nova" }),
+          body: JSON.stringify({ text: next.text, voice: next.voice }),
           signal: controller.signal,
         });
 
@@ -440,6 +443,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
         }
         cleanupAudioUrl();
         setPlayingAudio(false);
+        setSpeakingAgent(null);
       }
     }
 
@@ -447,11 +451,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   }, [cleanupAudioUrl]);
 
   const enqueueSpeech = useCallback(
-    (text: string, role: string) => {
+    (text: string, role: string, voice: string = "nova") => {
       if (!text.trim()) {
         return;
       }
-      speechQueueRef.current.push({ text, role });
+      speechQueueRef.current.push({ text, role, voice });
       drainSpeechQueue();
     },
     [drainSpeechQueue]
@@ -575,6 +579,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
       return;
     }
 
+    // Interrupt: stop any playing audio when the user sends a new message
+    if (playingAudio) {
+      stopAudio();
+    }
+
     const userMessage = input.trim();
     setInput("");
     setSending(true);
@@ -606,6 +615,8 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       const messageIds: Record<string, string> = {};
+      const agentVoices: Record<string, string> = {};
+      let useSentenceEvents = false;
       let buffer = "";
       let lastSeenSequence = -1;
 
@@ -643,8 +654,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
 
           if (event.type === "message_start") {
             const role = String(event.role || "assistant");
+            const voice = String(event.voice || "nova");
             setActiveAgent(role);
             speechBuffersRef.current[role] = "";
+            // Store voice per agent for fallback client-side TTS
+            agentVoices[role] = voice;
             const id = `stream-${Date.now()}-${role}`;
             messageIds[role] = id;
             setMessages((prev) => [
@@ -671,12 +685,26 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                   : message
               )
             );
-            if (experienceMode === "audio" && delta) {
+            // NOTE: Audio is now driven by server-side sentence_ready events.
+            // Client-side splitting kept as fallback for older backends.
+            if (experienceMode === "audio" && !useSentenceEvents && delta) {
               const nextBuffer = `${speechBuffersRef.current[role] || ""}${delta}`;
               const { segments, remaining } = extractSpeakableSegments(nextBuffer);
               speechBuffersRef.current[role] = remaining;
               for (const segment of segments) {
-                enqueueSpeech(segment, role);
+                enqueueSpeech(segment, role, agentVoices[role] || "nova");
+              }
+            }
+          } else if (event.type === "sentence_ready") {
+            // Server-side sentence splitting for TTS pipelining.
+            // Each event contains a complete sentence ready for TTS.
+            useSentenceEvents = true;
+            if (experienceMode === "audio") {
+              const role = String(event.role || "assistant");
+              const voice = String(event.voice || agentVoices[role] || "nova");
+              const sentence = String(event.sentence || "");
+              if (sentence.trim()) {
+                enqueueSpeech(sentence, role, voice);
               }
             }
           } else if (event.type === "message_end") {
@@ -693,10 +721,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                 )
               );
             }
-            if (experienceMode === "audio") {
+            // Only use client-side fallback if no sentence_ready events were received
+            if (experienceMode === "audio" && !useSentenceEvents) {
               const tail = (speechBuffersRef.current[role] || content).trim();
               if (tail) {
-                enqueueSpeech(tail, role);
+                enqueueSpeech(tail, role, agentVoices[role] || "nova");
               }
             }
             delete speechBuffersRef.current[role];
@@ -828,9 +857,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
             <div className="mt-2 flex items-center gap-2 text-xs text-primary">
               <VoiceWaves active={playingAudio || sending} />
               <span>
-                {playingAudio
-                  ? "Conversation audio is speaking the live stream."
-                  : "New agent turns will start speaking sentence by sentence."}
+                {playingAudio && speakingAgent
+                  ? `${getAgentConfig(speakingAgent).name} is speaking...`
+                  : playingAudio
+                    ? "Speaking..."
+                    : "Sentence-by-sentence audio — agents speak as they think."}
               </span>
             </div>
           ) : null}
