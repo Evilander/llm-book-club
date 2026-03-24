@@ -218,6 +218,7 @@ class DiscussionSession(Base):
     # Current discussion state
     current_phase: Mapped[str] = mapped_column(String(50), default="warmup")
     is_active: Mapped[bool] = mapped_column(default=True)
+    preferences_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Summary and notes
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -56,7 +56,7 @@ export default function Home() {
                   <span className="gradient-text">LLM Book Club</span>
                 </h1>
                 <p className="text-xs text-muted-foreground">
-                  Read together. Think deeper.
+                  Open a book. Hear it think back.
                 </p>
               </div>
             </div>
@@ -79,10 +79,19 @@ export default function Home() {
           <div className="container mx-auto px-4 py-8 animate-fade-up">
             <div className="max-w-6xl mx-auto">
               <div className="mb-8">
-                <h2 className="text-3xl font-bold mb-2">Your Books</h2>
-                <p className="text-muted-foreground">
-                  Pick something to read and Sam, Ellis & Kit will join you
-                </p>
+                <div className="mb-5 max-w-3xl">
+                  <p className="text-xs uppercase tracking-[0.28em] text-primary/80">
+                    Daily reading ritual
+                  </p>
+                  <h2 className="mt-3 text-4xl font-bold tracking-tight">
+                    Make your shelf feel alive again.
+                  </h2>
+                  <p className="mt-3 text-muted-foreground">
+                    Browse the books you already own, pair what you can with local
+                    audio, then choose whether the room feels rigorous, playful,
+                    socratic, cozy, or flirtatious.
+                  </p>
+                </div>
               </div>
               <BookShelf onSelectBook={handleSelectBook} />
             </div>

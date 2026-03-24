@@ -32,6 +32,81 @@ import re
 _logger = _logging.getLogger(__name__)
 
 
+STYLE_GUIDANCE = {
+    "critical_analysis": "Prioritize close reading, counterarguments, and evidence-backed disagreement. Treat unsupported claims as invitations for scrutiny.",
+    "fun": "Keep the exchange playful, lively, and welcoming. Use wit, warmth, and curiosity without losing grounding in the text.",
+    "socratic": "Lead with layered questions and let the user reason their way toward conclusions instead of rushing to answers.",
+    "sexy": "Keep the conversation flirtatious and sensuous in tone while staying tasteful, text-centered, and non-explicit.",
+    "cozy": "Make the session feel calm, companionable, and restorative. Favor encouragement, clarity, and emotional warmth.",
+}
+
+DESIRE_LENS_GUIDANCE = {
+    "woman": "For adult or erotic material, you may notice feminine glamour, chemistry, fashion, confidence, and desire from a sexy woman's point of view. Keep it consensual, non-explicit, and grounded in the text.",
+    "gay_man": "For adult or erotic material, you may notice masculine beauty, style, camp, chemistry, and romantic tension from a sexy gay man's point of view. Keep it consensual, non-explicit, and grounded in the text.",
+    "trans_woman": "For adult or erotic material, you may notice femininity, transformation, glamour, confidence, and desire from a sexy trans woman's point of view. Keep it affirming, respectful, non-fetishizing, and grounded in the text.",
+}
+
+ADULT_INTENSITY_GUIDANCE = {
+    "suggestive": "Adult material may be discussed with sensuality, innuendo, chemistry, and erotic charge, but keep the language restrained and non-graphic.",
+    "frank": "Adult material may be discussed more candidly and directly, acknowledging erotic intent and sexual tension in plain language, but keep it non-graphic, consensual, and text-grounded.",
+}
+
+EROTIC_FOCUS_GUIDANCE = {
+    "longing": "Track yearning, withheld touch, almost-confessions, and the slow ache of wanting.",
+    "glamour": "Track style, beauty, ritual, self-presentation, and scenes where elegance sharpens desire.",
+    "power": "Track dominance, surrender, control, bargaining, status, and shifts in who sets the terms of intimacy.",
+    "tenderness": "Track care, softness, vulnerability, reassurance, and the erotic warmth of emotional safety.",
+    "transgression": "Track taboo, risk, secrecy, rule-breaking, and the charge created by what should not happen but might.",
+}
+
+
+def _build_agent_context(
+    slice_text: str,
+    preferences: dict | None,
+) -> str:
+    if not preferences:
+        return slice_text
+
+    style = preferences.get("discussion_style")
+    vibes = preferences.get("vibes") or []
+    voice_profile = preferences.get("voice_profile")
+    reader_goal = preferences.get("reader_goal")
+    desire_lens = preferences.get("desire_lens")
+    adult_intensity = preferences.get("adult_intensity")
+    erotic_focus = preferences.get("erotic_focus")
+
+    lines = ["SESSION PREFERENCES:"]
+    if style:
+        lines.append(f"- Primary style: {style}")
+        guidance = STYLE_GUIDANCE.get(style)
+        if guidance:
+            lines.append(f"- Style guidance: {guidance}")
+    if vibes:
+        lines.append(f"- Vibes to preserve: {', '.join(vibes)}")
+    if voice_profile:
+        lines.append(f"- Voice preference: {voice_profile}")
+    if reader_goal:
+        lines.append(f"- Reader goal: {reader_goal}")
+    if desire_lens:
+        lines.append(f"- Desire lens: {desire_lens}")
+        guidance = DESIRE_LENS_GUIDANCE.get(desire_lens)
+        if guidance:
+            lines.append(f"- Desire-lens guidance: {guidance}")
+    if adult_intensity:
+        lines.append(f"- Adult intensity: {adult_intensity}")
+        guidance = ADULT_INTENSITY_GUIDANCE.get(adult_intensity)
+        if guidance:
+            lines.append(f"- Adult-intensity guidance: {guidance}")
+    if erotic_focus:
+        lines.append(f"- Erotic focus: {erotic_focus}")
+        guidance = EROTIC_FOCUS_GUIDANCE.get(erotic_focus)
+        if guidance:
+            lines.append(f"- Erotic-focus guidance: {guidance}")
+
+    lines.extend(["", "CURRENT READING SLICE:", slice_text])
+    return "\n".join(lines)
+
+
 @dataclass
 class DiscussionTurn:
     """A single turn in the discussion."""
@@ -64,6 +139,8 @@ class DiscussionEngine:
         if memory is None:
             memory = self._load_memory_context()
         self.memory = memory
+        self.preferences = session.preferences_json or {}
+        agent_context = _build_agent_context(slice_data.context_text, self.preferences)
 
         # Initialize LLM client
         self.llm = get_llm_client()
@@ -73,25 +150,31 @@ class DiscussionEngine:
             llm_client=self.llm,
             db=db,
             book_id=session.book_id,
-            context=slice_data.context_text,
+            context=agent_context,
             mode=self.mode,
             memory=self.memory,
+            allowed_section_ids=self.slice.section_ids,
+            allowed_chunk_ids=self.slice.chunk_ids,
         )
         self.close_reader = CloseReaderAgent(
             llm_client=self.llm,
             db=db,
             book_id=session.book_id,
-            context=slice_data.context_text,
+            context=agent_context,
             mode=self.mode,
             memory=self.memory,
+            allowed_section_ids=self.slice.section_ids,
+            allowed_chunk_ids=self.slice.chunk_ids,
         )
         self.skeptic = SkepticAgent(
             llm_client=self.llm,
             db=db,
             book_id=session.book_id,
-            context=slice_data.context_text,
+            context=agent_context,
             mode=self.mode,
             memory=self.memory,
+            allowed_section_ids=self.slice.section_ids,
+            allowed_chunk_ids=self.slice.chunk_ids,
         )
 
     def _load_memory_context(self) -> MemoryContext | None:
@@ -217,7 +300,7 @@ class DiscussionEngine:
                 topic_snippet = re.sub(r'\[\d+\]', '', topic_snippet)
                 topic_snippet = topic_snippet.strip()
                 if topic_snippet:
-                    return f"{topic_snippet} — {user_content}"
+                    return f"{topic_snippet} | {user_content}"
                 break
 
         return user_content
@@ -498,6 +581,7 @@ class DiscussionEngine:
                 "agent_id": role,
                 "sequence": event_seq,
                 "role": role,
+                "session_id": self.session.id,
             }
 
             chunks_list: list[str] = []
@@ -515,6 +599,7 @@ class DiscussionEngine:
                         "agent_id": role,
                         "sequence": event_seq,
                         "role": role,
+                        "session_id": self.session.id,
                         "delta": delta,
                     }
             except Exception as e:
@@ -532,6 +617,7 @@ class DiscussionEngine:
                     "agent_id": role,
                     "sequence": event_seq,
                     "role": role,
+                    "session_id": self.session.id,
                     "error": str(e),
                 }
                 return  # Skip message_end for this agent
@@ -542,7 +628,11 @@ class DiscussionEngine:
             # Verify citations with span alignment and build metrics
             cit_metrics: CitationMetrics | None = None
             if citations:
-                verified, invalid = verify_citations(self.db, citations)
+                verified, invalid = verify_citations(
+                    self.db,
+                    citations,
+                    allowed_chunk_ids=self.slice.chunk_ids,
+                )
                 total = len(verified) + len(invalid)
                 invalid_ratio = len(invalid) / total if total > 0 else 0.0
 
@@ -566,7 +656,11 @@ class DiscussionEngine:
                     if repaired_text:
                         new_clean, new_cits = parse_response_auto(repaired_text)
                         if new_cits:
-                            new_verified, new_invalid = verify_citations(self.db, new_cits)
+                            new_verified, new_invalid = verify_citations(
+                                self.db,
+                                new_cits,
+                                allowed_chunk_ids=self.slice.chunk_ids,
+                            )
                             new_total = len(new_verified) + len(new_invalid)
                             new_invalid_ratio = len(new_invalid) / new_total if new_total > 0 else 0.0
                             post_repair_verified_count = len(new_verified)
@@ -607,7 +701,7 @@ class DiscussionEngine:
                 }
             if not msg_metadata:
                 msg_metadata = None
-            self._save_message(
+            saved_message = self._save_message(
                 role_enum,
                 clean_text,
                 citations,
@@ -622,6 +716,8 @@ class DiscussionEngine:
                 "agent_id": role,
                 "sequence": event_seq,
                 "role": role,
+                "session_id": self.session.id,
+                "message_id": saved_message.id,
                 "content": clean_text,
                 "citations": citations,
                 "citation_quality": cit_metrics.to_dict() if cit_metrics is not None else None,

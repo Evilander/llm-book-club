@@ -21,12 +21,31 @@ class StartSessionRequest(BaseModel):
     time_budget_min: int = 20
     section_ids: list[str] | None = None  # if None: auto-select
     start_section_id: str | None = None  # start from this section
+    discussion_style: str | None = None
+    vibes: list[str] | None = None
+    voice_profile: str | None = None
+    reader_goal: str | None = None
+    experience_mode: str | None = None
+    desire_lens: str | None = None
+    adult_intensity: str | None = None
+    erotic_focus: str | None = None
 
 
 class MessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     include_close_reader: bool = True
     adaptive: bool = True  # Use MARS-style adaptive agent selection
+
+
+class SessionPreferencesUpdateRequest(BaseModel):
+    discussion_style: str | None = None
+    vibes: list[str] | None = None
+    voice_profile: str | None = None
+    reader_goal: str | None = None
+    experience_mode: str | None = None
+    desire_lens: str | None = None
+    adult_intensity: str | None = None
+    erotic_focus: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -37,6 +56,7 @@ class SessionResponse(BaseModel):
     current_phase: str
     sections: list[dict]
     is_active: bool
+    preferences: dict | None = None
 
 
 class MessageResponse(BaseModel):
@@ -90,6 +110,16 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
         section_ids=slice_data.section_ids,
         current_phase="warmup",
         is_active=True,
+        preferences_json={
+            "discussion_style": req.discussion_style,
+            "vibes": req.vibes or [],
+            "voice_profile": req.voice_profile,
+            "reader_goal": req.reader_goal,
+            "experience_mode": req.experience_mode or "text",
+            "desire_lens": req.desire_lens,
+            "adult_intensity": req.adult_intensity,
+            "erotic_focus": req.erotic_focus,
+        },
     )
     db.add(session)
     db.commit()
@@ -103,6 +133,7 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
         current_phase=session.current_phase,
         sections=slice_data.sections,
         is_active=session.is_active,
+        preferences=session.preferences_json,
     )
 
 
@@ -139,7 +170,28 @@ def get_session(session_id: str, db: Session = Depends(get_db)):
             for s in sections
         ],
         is_active=session.is_active,
+        preferences=session.preferences_json,
     )
+
+
+@router.patch("/sessions/{session_id}/preferences")
+def update_session_preferences(
+    session_id: str,
+    req: SessionPreferencesUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    session = db.query(DiscussionSession).filter(DiscussionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    existing = dict(session.preferences_json or {})
+    updates = req.model_dump(exclude_none=True)
+    existing.update(updates)
+    session.preferences_json = existing
+    db.commit()
+    db.refresh(session)
+
+    return {"session_id": session.id, "preferences": session.preferences_json}
 
 
 @router.get("/sessions/{session_id}/messages")

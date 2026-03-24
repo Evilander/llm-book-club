@@ -9,6 +9,9 @@ Built for local-first reading workflows, the app combines fast ingestion, hybrid
 - Multi-agent discussion with three distinct AI voices:
   Sam is the enthusiastic guide, Ellis is the close reader, and Kit is the devil's advocate.
 - Upload or browse local PDF, EPUB, and TXT books from your filesystem.
+- Open the active reading slice in a built-in reader panel while the discussion is running.
+- Switch between text mode and conversational audio mode with streaming TTS playback.
+- Pair an ingested ebook with likely local audiobook matches from a configured audiobook folder.
 - Real-time streaming responses over SSE for a live discussion feel.
 - Hybrid retrieval with pgvector, PostgreSQL full-text search, Reciprocal Rank Fusion, and optional reranking.
 - Citation-grounded responses tied back to the source text.
@@ -114,8 +117,14 @@ Most settings live in `apps/api/.env`.
 - `TTS_BASE_URL`: OpenAI-compatible TTS endpoint. For the bundled VibeVoice service, use `http://localhost:8880/v1`.
 - `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `TTS_MODEL`: TTS settings.
 - `BOOKS_DIR`: local directory exposed for filesystem book browsing.
+- `AUDIOBOOKS_DIR`: optional local audiobook directory used for matching likely companion audio files.
 - `DATABASE_URL`, `REDIS_URL`: infrastructure connections.
 - `CORS_ORIGINS`, `MAX_UPLOAD_MB`: app-level behavior.
+
+Provider note:
+
+- This repo currently authenticates hosted model providers with server-side API credentials.
+- OpenAI and Anthropic end-user OAuth is not wired in here because their current API flows for this stack still use API-key style server authentication rather than drop-in user OAuth sessions.
 
 Frontend configuration lives in `apps/web/.env.local`:
 

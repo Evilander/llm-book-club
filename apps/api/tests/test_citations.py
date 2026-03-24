@@ -276,6 +276,51 @@ class TestVerifyCitations:
             else:
                 pytest.fail(f"Expected fuzzy match with {overlap:.2f} overlap")
 
+    def test_reject_chunk_outside_allowed_slice(self, mock_db, sample_book):
+        """A valid quote should still fail if the chunk is outside the session slice."""
+        book = sample_book["book"]
+        allowed_section = sample_book["section"]
+
+        other_section = __import__(
+            "app.db.models", fromlist=["Section"]
+        ).Section(
+            id=str(uuid.uuid4()),
+            book_id=book.id,
+            title="Chapter 2: Elsewhere",
+            section_type="chapter",
+            order_index=1,
+            char_start=500,
+            char_end=1000,
+        )
+        mock_db.add(other_section)
+        mock_db.flush()
+
+        other_chunk = Chunk(
+            id=str(uuid.uuid4()),
+            book_id=book.id,
+            section_id=other_section.id,
+            order_index=0,
+            text="This spoiler quote lives outside the active session slice.",
+            char_start=500,
+            char_end=560,
+            token_count=10,
+        )
+        mock_db.add(other_chunk)
+        mock_db.commit()
+
+        allowed_chunk_ids = [
+            chunk.id
+            for chunk in mock_db.query(Chunk).filter(Chunk.section_id == allowed_section.id).all()
+        ]
+        verified, invalid = verify_citations(
+            mock_db,
+            [{"chunk_id": other_chunk.id, "text": "This spoiler quote lives outside"}],
+            allowed_chunk_ids=allowed_chunk_ids,
+        )
+        assert verified == []
+        assert len(invalid) == 1
+        assert invalid[0]["reason"] == "chunk outside session slice"
+
 
 # =========================================================================
 # Span alignment (compute_span_alignment-like logic)

@@ -1,50 +1,45 @@
-"""
-Memory and Progress API Endpoints
+"""Memory and progress endpoints aligned to the current ORM schema."""
 
-Endpoints for:
-- Book memory (key moments, themes, characters, notes)
-- Reading progress and units
-- Connections and cross-chapter insights
-"""
+from __future__ import annotations
 
-from datetime import datetime, date
-from typing import Optional
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..db.engine import get_db
-from ..db.models import (
-    Book, BookMemory, ReadingUnit, ReadingUnitStatus,
-    KeyMoment, TrackedTheme, TrackedCharacter, UserNote,
-    NoteType, Connection, DailyActivity, AchievementType,
+from ..db import (
+    AchievementType,
+    BookMemory,
+    Connection,
+    KeyMoment,
+    NoteType,
+    ReadingUnit,
+    ReadingUnitStatus,
+    TrackedCharacter,
+    TrackedTheme,
+    UserNote,
+    get_db,
 )
-from ..discussion.memory_prompts import build_memory_from_db, MemoryContext
 
 router = APIRouter(prefix="/v1/memory", tags=["memory"])
 
-
-# =============================================================================
-# SCHEMAS
-# =============================================================================
 
 class ReadingUnitResponse(BaseModel):
     id: str
     title: str
     unit_type: str
     order_index: int
-    token_estimate: int
-    reading_time_min: int
+    estimated_tokens: int | None = None
+    estimated_reading_min: int | None = None
     status: str
-    narrative_thread: Optional[str] = None
-    summary: Optional[str] = None
-
-    model_config = {"from_attributes": True}
+    narrative_thread: str | None = None
+    summary: str | None = None
 
 
 class BookMemoryResponse(BaseModel):
     book_id: str
-    current_unit_id: Optional[str] = None
+    current_unit_id: str | None = None
     units_completed: list[str]
     total_reading_time_min: int
     xp_earned: int
@@ -52,241 +47,156 @@ class BookMemoryResponse(BaseModel):
     reading_progress_pct: float
 
 
+class ProgressUpdate(BaseModel):
+    status: str
+    time_spent_min: int | None = None
+
+
 class KeyMomentCreate(BaseModel):
-    reading_unit_id: str
-    quote_text: str
-    char_start: int
-    char_end: int
-    significance: Optional[str] = None
+    reading_unit_id: str | None = None
+    chunk_id: str | None = None
+    title: str
+    description: str
+    quote: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    significance: str | None = None
+    moment_type: str = "plot"
+    source: str = "user"
 
 
 class KeyMomentResponse(BaseModel):
     id: str
-    reading_unit_id: str
-    quote_text: str
-    significance: Optional[str] = None
+    reading_unit_id: str | None = None
+    chunk_id: str | None = None
+    title: str
+    description: str
+    quote: str | None = None
+    significance: str | None = None
+    moment_type: str
+    source: str
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class ThemeCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    first_appearance_unit_id: Optional[str] = None
+    description: str | None = None
+    first_seen_unit_id: str | None = None
+    source: str = "user"
 
 
 class ThemeResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str] = None
-    mention_count: int
-    first_appearance_unit_id: Optional[str] = None
-
-    model_config = {"from_attributes": True}
+    description: str | None = None
+    evidence_count: int
+    strength: float
+    first_seen_unit_id: str | None = None
+    source: str
 
 
 class CharacterCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    first_appearance_unit_id: Optional[str] = None
+    description: str | None = None
+    first_appearance_unit_id: str | None = None
 
 
 class CharacterResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str] = None
-    arc_notes: Optional[str] = None
-    first_appearance_unit_id: Optional[str] = None
-
-    model_config = {"from_attributes": True}
+    description: str | None = None
+    aliases: list[str] | None = None
+    arc_notes: list[dict]
+    first_appearance_unit_id: str | None = None
+    prominence: float
 
 
 class UserNoteCreate(BaseModel):
-    reading_unit_id: str
+    reading_unit_id: str | None = None
+    chunk_id: str | None = None
     content: str
-    note_type: str = "note"  # highlight, note, question, insight, connection
-    char_start: Optional[int] = None
-    char_end: Optional[int] = None
+    note_type: str = "note"
+    highlighted_text: str | None = None
+    char_start: int | None = None
+    char_end: int | None = None
+    tags: list[str] | None = None
 
 
 class UserNoteResponse(BaseModel):
     id: str
     content: str
     note_type: str
-    reading_unit_id: str
+    reading_unit_id: str | None = None
+    chunk_id: str | None = None
+    highlighted_text: str | None = None
     created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class ConnectionCreate(BaseModel):
-    source_unit_id: str
-    source_char_start: int
-    source_char_end: int
-    source_description: str
-    target_unit_id: str
-    target_char_start: int
-    target_char_end: int
-    target_description: str
-    connection_type: str  # echo, contrast, foreshadowing, callback, parallel, evolution
+    from_unit_id: str
+    to_unit_id: str
+    from_quote: str | None = None
+    to_quote: str | None = None
+    connection_type: str
+    explanation: str
+    source: str = "user"
 
 
-class ProgressUpdate(BaseModel):
-    unit_id: str
-    status: str  # unread, in_progress, completed
-    time_spent_min: Optional[int] = None
+def _get_memory_or_404(db: Session, book_id: str) -> BookMemory:
+    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
+    if not memory:
+      raise HTTPException(status_code=404, detail="Book memory not found")
+    return memory
 
 
+def _unit_status(memory: BookMemory, unit_id: str) -> ReadingUnitStatus:
+    if unit_id in (memory.units_completed or []):
+        return ReadingUnitStatus.COMPLETED
+    if memory.current_unit_id == unit_id:
+        return ReadingUnitStatus.IN_PROGRESS
+    return ReadingUnitStatus.UNREAD
 
-# =============================================================================
-# READING UNITS ENDPOINTS
-# =============================================================================
+
+def _award_progress_xp(unit: ReadingUnit) -> int:
+    return 50 + min(50, (unit.estimated_reading_min or 10) * 2)
+
 
 @router.get("/books/{book_id}/units", response_model=list[ReadingUnitResponse])
-async def get_reading_units(
-    book_id: str,
-    status: Optional[str] = None,
-    db: Session = Depends(get_db),
-):
-    """Get all reading units for a book."""
-    query = db.query(ReadingUnit).filter(ReadingUnit.book_id == book_id)
+async def get_reading_units(book_id: str, status: str | None = None, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
+    units = (
+        db.query(ReadingUnit)
+        .filter(ReadingUnit.book_id == book_id)
+        .order_by(ReadingUnit.order_index)
+        .all()
+    )
 
-    if status:
-        try:
-            status_enum = ReadingUnitStatus(status)
-            query = query.filter(ReadingUnit.status == status_enum)
-        except ValueError:
-            pass
-
-    units = query.order_by(ReadingUnit.order_index).all()
-    return units
-
-
-@router.get("/books/{book_id}/units/{unit_id}", response_model=ReadingUnitResponse)
-async def get_reading_unit(
-    book_id: str,
-    unit_id: str,
-    db: Session = Depends(get_db),
-):
-    """Get a specific reading unit."""
-    unit = db.query(ReadingUnit).filter(
-        ReadingUnit.id == unit_id,
-        ReadingUnit.book_id == book_id,
-    ).first()
-
-    if not unit:
-        raise HTTPException(status_code=404, detail="Reading unit not found")
-
-    return unit
-
-
-@router.post("/books/{book_id}/units/{unit_id}/progress")
-async def update_unit_progress(
-    book_id: str,
-    unit_id: str,
-    update: ProgressUpdate,
-    db: Session = Depends(get_db),
-):
-    """Update reading progress for a unit."""
-    unit = db.query(ReadingUnit).filter(
-        ReadingUnit.id == unit_id,
-        ReadingUnit.book_id == book_id,
-    ).first()
-
-    if not unit:
-        raise HTTPException(status_code=404, detail="Reading unit not found")
-
-    # Update status
-    try:
-        unit.status = ReadingUnitStatus(update.status)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid status: {update.status}")
-
-    # Update BookMemory
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if memory:
-        if update.status == "completed":
-            if unit_id not in (memory.units_completed or []):
-                completed = list(memory.units_completed or [])
-                completed.append(unit_id)
-                memory.units_completed = completed
-
-                # Award XP for completing unit
-                xp_reward = _calculate_unit_xp(unit)
-                memory.xp_earned = (memory.xp_earned or 0) + xp_reward
-
-        if update.status == "in_progress":
-            memory.current_unit_id = unit_id
-
-        if update.time_spent_min:
-            memory.total_reading_time_min = (memory.total_reading_time_min or 0) + update.time_spent_min
-
-    db.commit()
-
-    # Update daily activity
-    await _update_daily_activity(db, book_id, update.time_spent_min or 0)
-
-    return {
-        "status": "updated",
-        "xp_earned": xp_reward if update.status == "completed" else 0,
-    }
-
-
-def _calculate_unit_xp(unit: ReadingUnit) -> int:
-    """Calculate XP for completing a reading unit."""
-    base_xp = 50
-    # Bonus for longer units
-    time_bonus = min(50, (unit.reading_time_min or 10) * 2)
-    return base_xp + time_bonus
-
-
-async def _update_daily_activity(db: Session, book_id: str, time_min: int):
-    """Update daily reading activity for streak tracking."""
-    today = date.today()
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        return
-
-    activity = db.query(DailyActivity).filter(
-        DailyActivity.memory_id == memory.id,
-        DailyActivity.date == today,
-    ).first()
-
-    if activity:
-        activity.reading_time_min += time_min
-        activity.units_completed += 1
-    else:
-        activity = DailyActivity(
-            memory_id=memory.id,
-            date=today,
-            reading_time_min=time_min,
-            units_completed=1,
-            xp_earned=0,
+    filtered: list[ReadingUnitResponse] = []
+    for unit in units:
+        derived_status = _unit_status(memory, unit.id).value
+        if status and derived_status != status:
+            continue
+        filtered.append(
+            ReadingUnitResponse(
+                id=unit.id,
+                title=unit.title,
+                unit_type=unit.unit_type.value if hasattr(unit.unit_type, "value") else str(unit.unit_type),
+                order_index=unit.order_index,
+                estimated_tokens=unit.estimated_tokens,
+                estimated_reading_min=unit.estimated_reading_min,
+                status=derived_status,
+                narrative_thread=unit.narrative_thread,
+                summary=unit.summary,
+            )
         )
-        db.add(activity)
+    return filtered
 
-    db.commit()
-
-
-# =============================================================================
-# BOOK MEMORY ENDPOINTS
-# =============================================================================
 
 @router.get("/books/{book_id}", response_model=BookMemoryResponse)
-async def get_book_memory(
-    book_id: str,
-    db: Session = Depends(get_db),
-):
-    """Get the complete memory state for a book."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
+async def get_book_memory(book_id: str, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
     total_units = db.query(ReadingUnit).filter(ReadingUnit.book_id == book_id).count()
     completed_count = len(memory.units_completed or [])
-
     return BookMemoryResponse(
         book_id=book_id,
         current_unit_id=memory.current_unit_id,
@@ -298,9 +208,48 @@ async def get_book_memory(
     )
 
 
-# =============================================================================
-# KEY MOMENTS ENDPOINTS
-# =============================================================================
+@router.post("/books/{book_id}/units/{unit_id}/progress")
+async def update_unit_progress(
+    book_id: str,
+    unit_id: str,
+    update: ProgressUpdate,
+    db: Session = Depends(get_db),
+):
+    memory = _get_memory_or_404(db, book_id)
+    unit = (
+        db.query(ReadingUnit)
+        .filter(ReadingUnit.book_id == book_id, ReadingUnit.id == unit_id)
+        .first()
+    )
+    if not unit:
+        raise HTTPException(status_code=404, detail="Reading unit not found")
+
+    try:
+        status = ReadingUnitStatus(update.status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {update.status}")
+
+    xp_earned = 0
+    completed = list(memory.units_completed or [])
+    if status == ReadingUnitStatus.COMPLETED and unit_id not in completed:
+        completed.append(unit_id)
+        memory.units_completed = completed
+        memory.current_unit_id = unit_id
+        xp_earned = _award_progress_xp(unit)
+        memory.xp_earned = (memory.xp_earned or 0) + xp_earned
+    elif status == ReadingUnitStatus.IN_PROGRESS:
+        memory.current_unit_id = unit_id
+    elif status == ReadingUnitStatus.UNREAD:
+        memory.current_unit_id = None if memory.current_unit_id == unit_id else memory.current_unit_id
+        memory.units_completed = [value for value in completed if value != unit_id]
+
+    if update.time_spent_min:
+        memory.total_reading_time_min = (memory.total_reading_time_min or 0) + update.time_spent_min
+
+    memory.last_read_at = datetime.utcnow()
+    db.commit()
+    return {"status": status.value, "xp_earned": xp_earned}
+
 
 @router.get("/books/{book_id}/moments", response_model=list[KeyMomentResponse])
 async def get_key_moments(
@@ -308,217 +257,215 @@ async def get_key_moments(
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    """Get all key moments marked for a book."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    moments = db.query(KeyMoment).filter(
-        KeyMoment.memory_id == memory.id
-    ).order_by(KeyMoment.created_at.desc()).limit(limit).all()
-
-    return moments
+    memory = _get_memory_or_404(db, book_id)
+    moments = (
+        db.query(KeyMoment)
+        .filter(KeyMoment.book_memory_id == memory.id)
+        .order_by(KeyMoment.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        KeyMomentResponse(
+            id=moment.id,
+            reading_unit_id=moment.reading_unit_id,
+            chunk_id=moment.chunk_id,
+            title=moment.title,
+            description=moment.description,
+            quote=moment.quote,
+            significance=moment.significance,
+            moment_type=moment.moment_type,
+            source=moment.source,
+            created_at=moment.created_at,
+        )
+        for moment in moments
+    ]
 
 
 @router.post("/books/{book_id}/moments", response_model=KeyMomentResponse)
-async def create_key_moment(
-    book_id: str,
-    moment: KeyMomentCreate,
-    db: Session = Depends(get_db),
-):
-    """Mark a key moment in the text."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
+async def create_key_moment(book_id: str, moment: KeyMomentCreate, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
     new_moment = KeyMoment(
-        memory_id=memory.id,
+        book_memory_id=memory.id,
         reading_unit_id=moment.reading_unit_id,
-        quote_text=moment.quote_text,
+        chunk_id=moment.chunk_id,
+        title=moment.title,
+        description=moment.description,
+        quote=moment.quote,
         char_start=moment.char_start,
         char_end=moment.char_end,
         significance=moment.significance,
+        moment_type=moment.moment_type,
+        source=moment.source,
     )
     db.add(new_moment)
-
-    # Award XP for marking a moment
     memory.xp_earned = (memory.xp_earned or 0) + 5
-
     db.commit()
     db.refresh(new_moment)
+    return KeyMomentResponse(
+        id=new_moment.id,
+        reading_unit_id=new_moment.reading_unit_id,
+        chunk_id=new_moment.chunk_id,
+        title=new_moment.title,
+        description=new_moment.description,
+        quote=new_moment.quote,
+        significance=new_moment.significance,
+        moment_type=new_moment.moment_type,
+        source=new_moment.source,
+        created_at=new_moment.created_at,
+    )
 
-    return new_moment
-
-
-# =============================================================================
-# THEMES ENDPOINTS
-# =============================================================================
 
 @router.get("/books/{book_id}/themes", response_model=list[ThemeResponse])
-async def get_tracked_themes(
-    book_id: str,
-    db: Session = Depends(get_db),
-):
-    """Get all tracked themes for a book."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    themes = db.query(TrackedTheme).filter(
-        TrackedTheme.memory_id == memory.id
-    ).order_by(TrackedTheme.mention_count.desc()).all()
-
-    return themes
+async def get_tracked_themes(book_id: str, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
+    themes = (
+        db.query(TrackedTheme)
+        .filter(TrackedTheme.book_memory_id == memory.id)
+        .order_by(TrackedTheme.updated_at.desc())
+        .all()
+    )
+    return [
+        ThemeResponse(
+            id=theme.id,
+            name=theme.name,
+            description=theme.description,
+            evidence_count=len(theme.evidence or []),
+            strength=theme.strength,
+            first_seen_unit_id=theme.first_seen_unit_id,
+            source=theme.source,
+        )
+        for theme in themes
+    ]
 
 
 @router.post("/books/{book_id}/themes", response_model=ThemeResponse)
-async def create_tracked_theme(
-    book_id: str,
-    theme: ThemeCreate,
-    db: Session = Depends(get_db),
-):
-    """Start tracking a theme."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
+async def create_tracked_theme(book_id: str, theme: ThemeCreate, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
     new_theme = TrackedTheme(
-        memory_id=memory.id,
+        book_memory_id=memory.id,
         name=theme.name,
         description=theme.description,
-        first_appearance_unit_id=theme.first_appearance_unit_id,
-        mention_count=1,
+        first_seen_unit_id=theme.first_seen_unit_id,
+        source=theme.source,
+        evidence=[],
     )
     db.add(new_theme)
     db.commit()
     db.refresh(new_theme)
+    return ThemeResponse(
+        id=new_theme.id,
+        name=new_theme.name,
+        description=new_theme.description,
+        evidence_count=0,
+        strength=new_theme.strength,
+        first_seen_unit_id=new_theme.first_seen_unit_id,
+        source=new_theme.source,
+    )
 
-    return new_theme
-
-
-@router.post("/books/{book_id}/themes/{theme_id}/mention")
-async def increment_theme_mention(
-    book_id: str,
-    theme_id: str,
-    db: Session = Depends(get_db),
-):
-    """Increment the mention count for a theme."""
-    theme = db.query(TrackedTheme).filter(TrackedTheme.id == theme_id).first()
-    if not theme:
-        raise HTTPException(status_code=404, detail="Theme not found")
-
-    theme.mention_count = (theme.mention_count or 0) + 1
-    db.commit()
-
-    return {"status": "updated", "mention_count": theme.mention_count}
-
-
-# =============================================================================
-# CHARACTERS ENDPOINTS
-# =============================================================================
 
 @router.get("/books/{book_id}/characters", response_model=list[CharacterResponse])
-async def get_tracked_characters(
-    book_id: str,
-    db: Session = Depends(get_db),
-):
-    """Get all tracked characters for a book."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    characters = db.query(TrackedCharacter).filter(
-        TrackedCharacter.memory_id == memory.id
-    ).all()
-
-    return characters
+async def get_tracked_characters(book_id: str, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
+    characters = (
+        db.query(TrackedCharacter)
+        .filter(TrackedCharacter.book_memory_id == memory.id)
+        .order_by(TrackedCharacter.updated_at.desc())
+        .all()
+    )
+    return [
+        CharacterResponse(
+            id=character.id,
+            name=character.name,
+            description=character.description,
+            aliases=character.aliases,
+            arc_notes=character.arc_notes or [],
+            first_appearance_unit_id=character.first_appearance_unit_id,
+            prominence=character.prominence,
+        )
+        for character in characters
+    ]
 
 
 @router.post("/books/{book_id}/characters", response_model=CharacterResponse)
-async def create_tracked_character(
-    book_id: str,
-    character: CharacterCreate,
-    db: Session = Depends(get_db),
-):
-    """Start tracking a character."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    new_char = TrackedCharacter(
-        memory_id=memory.id,
+async def create_tracked_character(book_id: str, character: CharacterCreate, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
+    new_character = TrackedCharacter(
+        book_memory_id=memory.id,
         name=character.name,
         description=character.description,
         first_appearance_unit_id=character.first_appearance_unit_id,
+        arc_notes=[],
     )
-    db.add(new_char)
+    db.add(new_character)
     db.commit()
-    db.refresh(new_char)
+    db.refresh(new_character)
+    return CharacterResponse(
+        id=new_character.id,
+        name=new_character.name,
+        description=new_character.description,
+        aliases=new_character.aliases,
+        arc_notes=new_character.arc_notes or [],
+        first_appearance_unit_id=new_character.first_appearance_unit_id,
+        prominence=new_character.prominence,
+    )
 
-    return new_char
-
-
-# =============================================================================
-# USER NOTES ENDPOINTS
-# =============================================================================
 
 @router.get("/books/{book_id}/notes", response_model=list[UserNoteResponse])
 async def get_user_notes(
     book_id: str,
-    unit_id: Optional[str] = None,
-    note_type: Optional[str] = None,
+    unit_id: str | None = None,
+    note_type: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
-    """Get user notes for a book."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    query = db.query(UserNote).filter(UserNote.memory_id == memory.id)
-
+    memory = _get_memory_or_404(db, book_id)
+    query = db.query(UserNote).filter(UserNote.book_memory_id == memory.id)
     if unit_id:
         query = query.filter(UserNote.reading_unit_id == unit_id)
-
     if note_type:
         try:
-            nt = NoteType(note_type)
-            query = query.filter(UserNote.note_type == nt)
+            parsed = NoteType(note_type)
+            query = query.filter(UserNote.note_type == parsed)
         except ValueError:
-            pass
+            raise HTTPException(status_code=400, detail=f"Invalid note_type: {note_type}")
 
     notes = query.order_by(UserNote.created_at.desc()).limit(limit).all()
-
-    return notes
+    return [
+        UserNoteResponse(
+            id=note.id,
+            content=note.content,
+            note_type=note.note_type.value if hasattr(note.note_type, "value") else str(note.note_type),
+            reading_unit_id=note.reading_unit_id,
+            chunk_id=note.chunk_id,
+            highlighted_text=note.highlighted_text,
+            created_at=note.created_at,
+        )
+        for note in notes
+    ]
 
 
 @router.post("/books/{book_id}/notes", response_model=UserNoteResponse)
-async def create_user_note(
-    book_id: str,
-    note: UserNoteCreate,
-    db: Session = Depends(get_db),
-):
-    """Create a user note."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
+async def create_user_note(book_id: str, note: UserNoteCreate, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
     try:
-        note_type_enum = NoteType(note.note_type)
+        parsed_type = NoteType(note.note_type)
     except ValueError:
-        note_type_enum = NoteType.NOTE
+        raise HTTPException(status_code=400, detail=f"Invalid note_type: {note.note_type}")
 
     new_note = UserNote(
-        memory_id=memory.id,
+        book_memory_id=memory.id,
         reading_unit_id=note.reading_unit_id,
+        chunk_id=note.chunk_id,
         content=note.content,
-        note_type=note_type_enum,
+        note_type=parsed_type,
+        highlighted_text=note.highlighted_text,
         char_start=note.char_start,
         char_end=note.char_end,
+        tags=note.tags,
     )
     db.add(new_note)
 
-    # Award XP for notes
     xp_awards = {
         NoteType.HIGHLIGHT: 2,
         NoteType.NOTE: 5,
@@ -526,69 +473,42 @@ async def create_user_note(
         NoteType.INSIGHT: 10,
         NoteType.CONNECTION: 15,
     }
-    memory.xp_earned = (memory.xp_earned or 0) + xp_awards.get(note_type_enum, 5)
+    memory.xp_earned = (memory.xp_earned or 0) + xp_awards.get(parsed_type, 5)
 
-    # Check for first insight achievement
-    if note_type_enum == NoteType.INSIGHT:
-        insights_count = db.query(UserNote).filter(
-            UserNote.memory_id == memory.id,
-            UserNote.note_type == NoteType.INSIGHT,
-        ).count()
-
-        if insights_count == 0:  # This is the first one
-            achievements = list(memory.achievements_unlocked or [])
-            if AchievementType.FIRST_INSIGHT.value not in achievements:
-                achievements.append(AchievementType.FIRST_INSIGHT.value)
-                memory.achievements_unlocked = achievements
-                memory.xp_earned += 50  # Achievement bonus
+    if parsed_type == NoteType.INSIGHT and AchievementType.FIRST_INSIGHT.value not in (memory.achievements_unlocked or []):
+        achievements = list(memory.achievements_unlocked or [])
+        achievements.append(AchievementType.FIRST_INSIGHT.value)
+        memory.achievements_unlocked = achievements
+        memory.xp_earned += 50
 
     db.commit()
     db.refresh(new_note)
+    return UserNoteResponse(
+        id=new_note.id,
+        content=new_note.content,
+        note_type=new_note.note_type.value if hasattr(new_note.note_type, "value") else str(new_note.note_type),
+        reading_unit_id=new_note.reading_unit_id,
+        chunk_id=new_note.chunk_id,
+        highlighted_text=new_note.highlighted_text,
+        created_at=new_note.created_at,
+    )
 
-    return new_note
-
-
-# =============================================================================
-# CONNECTIONS ENDPOINTS
-# =============================================================================
 
 @router.post("/books/{book_id}/connections")
-async def create_connection(
-    book_id: str,
-    connection: ConnectionCreate,
-    db: Session = Depends(get_db),
-):
-    """Create a connection between two passages."""
-    memory = db.query(BookMemory).filter(BookMemory.book_id == book_id).first()
-    if not memory:
-        raise HTTPException(status_code=404, detail="Book memory not found")
-
-    new_conn = Connection(
-        memory_id=memory.id,
-        source_unit_id=connection.source_unit_id,
-        source_char_start=connection.source_char_start,
-        source_char_end=connection.source_char_end,
-        source_description=connection.source_description,
-        target_unit_id=connection.target_unit_id,
-        target_char_start=connection.target_char_start,
-        target_char_end=connection.target_char_end,
-        target_description=connection.target_description,
+async def create_connection(book_id: str, connection: ConnectionCreate, db: Session = Depends(get_db)):
+    memory = _get_memory_or_404(db, book_id)
+    new_connection = Connection(
+        book_memory_id=memory.id,
+        from_unit_id=connection.from_unit_id,
+        to_unit_id=connection.to_unit_id,
+        from_quote=connection.from_quote,
+        to_quote=connection.to_quote,
         connection_type=connection.connection_type,
+        explanation=connection.explanation,
+        source=connection.source,
     )
-    db.add(new_conn)
-
-    # Award XP for connections
+    db.add(new_connection)
     memory.xp_earned = (memory.xp_earned or 0) + 20
-
-    # Check for connection hunter achievement
-    connections_count = db.query(Connection).filter(Connection.memory_id == memory.id).count()
-    if connections_count >= 9:  # This will be #10
-        achievements = list(memory.achievements_unlocked or [])
-        if AchievementType.CONNECTION_HUNTER.value not in achievements:
-            achievements.append(AchievementType.CONNECTION_HUNTER.value)
-            memory.achievements_unlocked = achievements
-            memory.xp_earned += 100
-
     db.commit()
-
-    return {"status": "created", "id": new_conn.id}
+    db.refresh(new_connection)
+    return {"status": "created", "id": new_connection.id}

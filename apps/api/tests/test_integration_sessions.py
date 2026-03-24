@@ -218,6 +218,32 @@ class TestStartSession:
         )
         assert resp.status_code == 400
 
+    def test_start_session_persists_preferences(self, client, book_with_chunks):
+        """Session preference payload is stored and returned."""
+        book = book_with_chunks["book"]
+        resp = client.post(
+            "/v1/sessions/start",
+            json={
+                "book_id": book.id,
+                "mode": "conversation",
+                "discussion_style": "fun",
+                "reader_goal": "Talk like a real book club",
+                "voice_profile": "Warm studio host",
+                "experience_mode": "audio",
+                "desire_lens": "trans_woman",
+                "adult_intensity": "frank",
+                "erotic_focus": "glamour",
+                "vibes": ["fun", "nightly"],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["preferences"]["discussion_style"] == "fun"
+        assert data["preferences"]["experience_mode"] == "audio"
+        assert data["preferences"]["desire_lens"] == "trans_woman"
+        assert data["preferences"]["adult_intensity"] == "frank"
+        assert data["preferences"]["erotic_focus"] == "glamour"
+
 
 # ---------------------------------------------------------------------------
 # Tests: GET /v1/sessions/{session_id}
@@ -240,6 +266,27 @@ class TestGetSession:
         """Getting a non-existent session returns 404."""
         resp = client.get("/v1/sessions/nonexistent-id")
         assert resp.status_code == 404
+
+    def test_patch_session_preferences(self, client, active_session):
+        """Preference updates can be changed after session start."""
+        session = active_session["session"]
+        resp = client.patch(
+            f"/v1/sessions/{session.id}/preferences",
+            json={
+                "experience_mode": "audio",
+                "reader_goal": "Notice the craft",
+                "desire_lens": "gay_man",
+                "adult_intensity": "suggestive",
+                "erotic_focus": "power",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["preferences"]["experience_mode"] == "audio"
+        assert data["preferences"]["reader_goal"] == "Notice the craft"
+        assert data["preferences"]["desire_lens"] == "gay_man"
+        assert data["preferences"]["adult_intensity"] == "suggestive"
+        assert data["preferences"]["erotic_focus"] == "power"
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +497,7 @@ class TestStreamMessage:
                 "agent_id": "facilitator",
                 "sequence": 1,
                 "role": "facilitator",
+                "session_id": session.id,
             }
             yield {
                 "type": "message_delta",
@@ -458,6 +506,7 @@ class TestStreamMessage:
                 "agent_id": "facilitator",
                 "sequence": 2,
                 "role": "facilitator",
+                "session_id": session.id,
                 "delta": "Hello there!",
             }
             yield {
@@ -467,6 +516,8 @@ class TestStreamMessage:
                 "agent_id": "facilitator",
                 "sequence": 3,
                 "role": "facilitator",
+                "session_id": session.id,
+                "message_id": "message-123",
                 "content": "Hello there!",
                 "citations": [],
                 "citation_quality": None,
@@ -523,6 +574,8 @@ class TestStreamMessage:
             assert "content" in end_event
             assert "citations" in end_event
             assert "token_usage" in end_event
+            assert end_event["session_id"] == session.id
+            assert end_event["message_id"] == "message-123"
 
 
 # ---------------------------------------------------------------------------

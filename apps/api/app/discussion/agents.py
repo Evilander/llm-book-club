@@ -290,6 +290,7 @@ def verify_citations(
     db: Session,
     citations: list[dict],
     fuzzy_threshold: float = 0.8,
+    allowed_chunk_ids: list[str] | set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Verify that citations actually appear in their referenced chunks and
@@ -310,6 +311,11 @@ def verify_citations(
 
     verified: list[dict] = []
     invalid: list[dict] = []
+    allowed_chunk_id_set = (
+        {str(chunk_id) for chunk_id in allowed_chunk_ids}
+        if allowed_chunk_ids is not None
+        else None
+    )
 
     # Batch-fetch all referenced chunks to avoid N+1 queries
     chunk_ids = list({
@@ -332,6 +338,17 @@ def verify_citations(
                 "verified": False,
                 "match_type": None,
                 "reason": "missing chunk_id or text",
+            })
+            continue
+
+        if allowed_chunk_id_set is not None and chunk_id not in allowed_chunk_id_set:
+            invalid.append({
+                **citation,
+                "char_start": None,
+                "char_end": None,
+                "verified": False,
+                "match_type": None,
+                "reason": "chunk outside session slice",
             })
             continue
 
@@ -408,6 +425,7 @@ def parse_and_verify_citations(
     db: Session,
     text: str,
     strict: bool = False,
+    allowed_chunk_ids: list[str] | set[str] | None = None,
 ) -> tuple[str, list[dict], list[dict]]:
     """
     Parse citations from text (structured JSON then regex fallback) and
@@ -422,7 +440,11 @@ def parse_and_verify_citations(
         Tuple of (clean_text, verified_citations, invalid_citations)
     """
     clean_text, citations = parse_response_auto(text)
-    verified, invalid = verify_citations(db, citations)
+    verified, invalid = verify_citations(
+        db,
+        citations,
+        allowed_chunk_ids=allowed_chunk_ids,
+    )
 
     if strict:
         return clean_text, verified, invalid
@@ -529,6 +551,8 @@ class BaseAgent:
         context: str,
         mode: str = "guided",
         memory: MemoryContext | None = None,
+        allowed_section_ids: list[str] | None = None,
+        allowed_chunk_ids: list[str] | None = None,
     ):
         self.llm = llm_client
         self.db = db
@@ -536,6 +560,8 @@ class BaseAgent:
         self.context = context
         self.mode = mode
         self.memory = memory
+        self.allowed_section_ids = list(allowed_section_ids or [])
+        self.allowed_chunk_ids = list(allowed_chunk_ids or [])
         # Store retrieved chunks for potential citation repair
         self._last_retrieved_chunks: list[dict] = []
         # Use memory-aware prompt if memory is available, otherwise standard prompt
@@ -585,7 +611,11 @@ class BaseAgent:
         if not citations:
             return clean_text, [], None
 
-        verified, invalid = verify_citations(self.db, citations)
+        verified, invalid = verify_citations(
+            self.db,
+            citations,
+            allowed_chunk_ids=self.allowed_chunk_ids or None,
+        )
 
         total = len(verified) + len(invalid)
         invalid_ratio = len(invalid) / total if total > 0 else 0.0
@@ -612,7 +642,9 @@ class BaseAgent:
                 new_clean, new_citations = parse_response_auto(repaired_text)
                 if new_citations:
                     new_verified, new_invalid = verify_citations(
-                        self.db, new_citations,
+                        self.db,
+                        new_citations,
+                        allowed_chunk_ids=self.allowed_chunk_ids or None,
                     )
                     new_total = len(new_verified) + len(new_invalid)
                     new_invalid_ratio = (
@@ -698,7 +730,13 @@ class BaseAgent:
         """Generate a response with additional retrieval for context."""
         additional_context = ""
         if query:
-            results = await search_chunks(self.db, self.book_id, query, limit=5)
+            results = await search_chunks(
+                self.db,
+                self.book_id,
+                query,
+                limit=5,
+                section_ids=self.allowed_section_ids or None,
+            )
             additional_context = self._build_retrieval_context(results)
 
         enhanced_system = self.system_prompt
@@ -762,7 +800,13 @@ class BaseAgent:
         """
         additional_context = ""
         if query:
-            results = await search_chunks(self.db, self.book_id, query, limit=5)
+            results = await search_chunks(
+                self.db,
+                self.book_id,
+                query,
+                limit=5,
+                section_ids=self.allowed_section_ids or None,
+            )
             additional_context = self._build_retrieval_context(results)
 
         enhanced_system = self.system_prompt
