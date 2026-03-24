@@ -151,10 +151,18 @@ class DiscussionEngine:
         self.preferences = session.preferences_json or {}
         agent_context = _build_agent_context(slice_data.context_text, self.preferences)
 
+        # Detect adult mode from session preferences
+        is_adult = (
+            self.preferences.get("discussion_style") == "sexy"
+            or self.preferences.get("experience_mode") == "after_dark"
+            or self.preferences.get("desire_lens") is not None
+            or self.preferences.get("adult_intensity") is not None
+        )
+
         # Initialize LLM client
         self.llm = get_llm_client()
 
-        # Initialize agents with memory context
+        # Initialize agents with memory context and adult mode overlay
         self.facilitator = FacilitatorAgent(
             llm_client=self.llm,
             db=db,
@@ -164,6 +172,7 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
+            adult_mode=is_adult,
         )
         self.close_reader = CloseReaderAgent(
             llm_client=self.llm,
@@ -174,6 +183,7 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
+            adult_mode=is_adult,
         )
         self.skeptic = SkepticAgent(
             llm_client=self.llm,
@@ -184,6 +194,7 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
+            adult_mode=is_adult,
         )
 
     def _load_memory_context(self) -> MemoryContext | None:
