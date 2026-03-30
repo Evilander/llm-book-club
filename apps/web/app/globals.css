@@ -58,7 +58,7 @@
     --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 
-  /* After-dark mode — warmer, rose-tinted, more intimate */
+  /* After-dark mode — density/friction/warmth transformation, not just color */
   .after-dark {
     --primary: 350 89% 60%;
     --accent: 292 84% 61%;
@@ -67,11 +67,15 @@
     --gradient-start: 350 89% 60%;
     --gradient-end: 292 84% 61%;
 
-    --card: 20 20% 6%;
-    --border: 350 30% 18%;
+    --background: 20 20% 3%;
+    --card: 20 20% 5%;
+    --foreground: 30 10% 88%;
+    --border: 350 20% 14%;
+    --muted-foreground: 24 8% 42%;
 
-    --glass-bg: rgba(244, 63, 94, 0.04);
-    --glass-border: rgba(244, 63, 94, 0.12);
+    --glass-bg: rgba(244, 63, 94, 0.03);
+    --glass-border: rgba(244, 63, 94, 0.10);
+    --glass-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
   }
 
   .light {
@@ -467,4 +471,50 @@
 /* Focus ring */
 .focus-ring {
   @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+/* After-dark mode transformations — beyond color swap */
+.after-dark {
+  /* Softer text rendering */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.after-dark .glass {
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+/* After-dark message entrance: slower, more intimate reveal */
+.after-dark .message-enter-agent {
+  animation: fade-in 0.6s ease-out forwards;
+}
+
+.after-dark .animate-fade-up {
+  animation-duration: 0.7s;
+}
+
+/* After-dark hover: reduced lift, warmer glow */
+.after-dark .interactive:hover {
+  transform: translateY(-1px);
+}
+
+.after-dark .shadow-glow {
+  box-shadow: 0 0 20px hsl(350 89% 60% / 0.25),
+              0 0 40px hsl(292 84% 61% / 0.08);
+}
+
+/* After-dark ambient background */
+.after-dark .ambient-bg::before {
+  background: radial-gradient(
+    circle at 30% 20%,
+    hsl(350 89% 60% / 0.06) 0%,
+    transparent 50%
+  ),
+  radial-gradient(
+    circle at 70% 80%,
+    hsl(292 84% 61% / 0.04) 0%,
+    transparent 50%
+  );
 }
