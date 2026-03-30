@@ -45,11 +45,23 @@ Backend files that matter most:
 
 Frontend files that matter most:
 
-- `apps/web/app/page.tsx` - main view controller
+- `apps/web/app/page.tsx` - library home page
+- `apps/web/app/books/[bookId]/page.tsx` - session setup route
+- `apps/web/app/books/[bookId]/sessions/[sessionId]/page.tsx` - discussion route
+- `apps/web/app/layout.tsx` - shared header, fonts, toaster
+- `apps/web/app/globals.css` - design tokens, after-dark mode, animations
 - `apps/web/components/book-shelf.tsx` - library browse
 - `apps/web/components/session-setup.tsx` - session configuration
 - `apps/web/components/discussion-stage.tsx` - discussion UI, streaming, citations, audio
 - `apps/web/components/voice-input.tsx` - speech-to-text input
+- `apps/web/components/ui/citation-card.tsx` - citation display with verification
+- `apps/web/components/ui/prompt-chip-rail.tsx` - conversation spark buttons
+- `apps/web/components/ui/voice-roster.tsx` - agent identity roster
+- `apps/web/components/ui/mode-banner.tsx` - after-dark mode banner
+- `apps/web/components/ui/session-recap.tsx` - session summary card
+- `apps/web/components/ui/screen-intro.tsx` - editorial section header
+- `apps/web/tailwind.config.ts` - design tokens, font families, citation colors
+- `design/llm-book-club.DESIGN.md` - full design system specification
 
 ## Data Model
 
@@ -213,17 +225,30 @@ Current environment variables and defaults:
 
 ## Current Frontend Behavior
 
+Routes:
+- `/` - Library home (static, code-split)
+- `/books/[bookId]` - Session setup (dynamic)
+- `/books/[bookId]/sessions/[sessionId]` - Discussion (dynamic)
+
 The frontend currently supports:
 
-- library browsing
-- session setup
-- reading-slice selection
-- discussion streaming
-- citations and quote inspection
-- text mode and conversational audio mode
+- library browsing with Continue Reading, search, extension filters
+- session setup with mode, style, time budget, reader goal, experience mode, room autonomy
+- reading-slice selection with section previews
+- discussion streaming with multi-agent turns
+- click-to-highlight citation linking (reader panel scrolls to cited span)
+- text mode and conversational audio mode with sentence-level TTS
+- mobile-responsive sidebar with slide-in overlay
+- toast notifications for all user actions (sonner)
 - a dedicated adult-session setup path with 18+ gating
+- after-dark CSS class (`.after-dark`) that transforms density/warmth/friction
 
-The main discussion UI is `apps/web/components/discussion-stage.tsx`. The main setup UI is `apps/web/components/session-setup.tsx`.
+Design system:
+- Typography: Literata (serif headlines), Inter (body), Space Grotesk (labels)
+- Color tokens: warm stone base, amber primary, rose after-dark
+- Agent tokens: Sam=amber, Ellis=teal, Kit=rose, AfterDark=fuchsia
+- Citation tokens: exact=emerald, normalized=amber, fuzzy=yellow, unverified=red
+- After-dark mode: density transformation (deeper bg, softer contrast, slower animations, warmer glass blur)
 
 ## Current Verification State
 
@@ -241,11 +266,39 @@ Frontend checks that have passed in this workspace:
 - `npx tsc --noEmit` in `apps/web`
 - `npm run build` in `apps/web`
 
+## Prioritized Next Tasks (from adversary review, 2026-03-30)
+
+Architecture:
+1. Break God components: extract `useDiscussionSession`, `useAudioPlayback` hooks, `MessageCard`, `ReaderPanel` from 1534-line discussion-stage.tsx
+2. Extract shared types to `apps/web/types/api.ts` (CitationData, ExploreSection, etc. duplicated between components)
+3. Use the installed `motion` package: add AnimatePresence for route transitions, layoutId for shared elements, gesture interactions
+4. Build a session opener transition (5-second "room opening" with cast introduction)
+
+Product:
+5. Add thumbs up/down on agent responses (zero feedback loops currently)
+6. Replace hero stat cards with personalized "Continue where you left off" recommendation
+7. Make agents visually distinct (different output formats, not just colored borders)
+8. Add time-of-day awareness for ritual feel
+9. Pre-ingest public domain books for zero-upload onboarding
+
+Operations:
+10. Cost dashboard: aggregate token usage from metadata_json, expose via /admin/costs
+11. Prompt registry: versioned store, log which version produced which response
+12. Nightly eval pipeline: automated citation accuracy + agent distinctiveness scoring
+
+Research integration (from arXiv/innovation sprint):
+13. Voxtral TTS provider: self-hosted, 70ms latency, beats ElevenLabs, voice cloning
+14. ModernBERT reranker swap: drop-in for BAAI/bge-reranker-v2-m3
+15. SC-RAG pre-generation evidence gate: quality-check retrieval before agent generation
+
 ## Known Caveats
 
 - The test warning about `asyncio_mode` is still present.
 - `apps/web/components/discussion-stage.tsx` still contains a client-side fallback sentence extractor for backward compatibility, even though server-driven `sentence_ready` events now exist.
-- `apps/api/app/routers/tts.py` still uses `print()` in one streaming error path.
+- `apps/web/components/discussion-stage.tsx` is 1534 lines and needs decomposition (see task #1 above).
+- `motion` package is installed but not yet imported in any component.
+- `SessionRecap` component is created but not yet wired into any view.
+- `VoiceRoster` and `CitationCard` components are created but discussion-stage still uses inline implementations.
 - `pytest-of-evela/` is present in the worktree as a test artifact.
 
 ## Current Product Notes
