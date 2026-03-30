@@ -964,31 +964,54 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
         </div>
       </div>
 
-      <div className="flex items-center justify-between border-t border-white/10 pt-4">
-        <p className="text-sm text-muted-foreground">
-          Local audiobook pairing is supported. OAuth-based OpenAI/Claude API access is
-          not wired here because those providers still authenticate this stack with API
-          credentials rather than end-user OAuth.
-        </p>
-        <Button
-          size="lg"
-          variant="gradient"
-          onClick={startSession}
-          disabled={starting || loading || (selectedStyle === "sexy" && !adultConfirmed)}
-          className="gap-2"
-        >
-          {starting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Opening room...
-            </>
-          ) : (
-            <>
-              <Play className="h-4 w-4" />
-              {selectedStyle === "sexy" ? "Open after-dark room" : "Start reading session"}
-            </>
-          )}
-        </Button>
+      <div className="border-t border-white/10 pt-4 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-xs text-muted-foreground font-label space-y-1">
+            <p>
+              Est. cost per turn: ~$0.02-0.08 (depends on model &amp; agent count)
+            </p>
+            <p>
+              {timeBudget} min session &asymp; {Math.ceil(timeBudget / 3)}-{Math.ceil(timeBudget / 1.5)} turns &asymp; ${(Math.ceil(timeBudget / 3) * 0.03).toFixed(2)}-${(Math.ceil(timeBudget / 1.5) * 0.06).toFixed(2)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSelectedMode("conversation");
+                setSelectedStyle("cozy");
+                setTimeBudget(15);
+                setReaderGoal(READER_GOALS[0]);
+                setAutonomyLevel("conversational");
+                startSession();
+              }}
+              disabled={starting || loading}
+              className="gap-2"
+            >
+              <Sparkles className="h-4 w-4" />
+              Quick start
+            </Button>
+            <Button
+              size="lg"
+              variant="gradient"
+              onClick={startSession}
+              disabled={starting || loading || (selectedStyle === "sexy" && !adultConfirmed)}
+              className="gap-2"
+            >
+              {starting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Opening room...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  {selectedStyle === "sexy" ? "Open after-dark room" : "Start reading session"}
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

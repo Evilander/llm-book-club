@@ -31,11 +31,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { API_BASE, cn } from "@/lib/utils";
+import { useAudioPlayback } from "@/hooks/use-audio-playback";
+import { useDiscussionSession } from "@/hooks/use-discussion-session";
 import type {
   CitationData,
   ExplorePayload,
-  Message,
-  SessionData,
   SessionPreferences,
 } from "@/types/api";
 
@@ -155,7 +155,7 @@ function getAgentConfig(role: string, preferences?: SessionPreferences | null) {
 }
 
 function buildRoomInvitation(
-  session: SessionData | null,
+  session: import("@/types/api").SessionData | null,
   activeSectionTitle: string | null
 ) {
   if (!session) {
@@ -178,7 +178,7 @@ function buildRoomInvitation(
 }
 
 function buildDiscussionSparkDeck(
-  session: SessionData | null,
+  session: import("@/types/api").SessionData | null,
   activeSectionTitle: string | null
 ) {
   const sectionNoun = activeSectionTitle || "this section";
@@ -233,134 +233,9 @@ function citationLabel(citation: CitationData) {
   return "Unchecked";
 }
 
-function extractSpeakableSegments(buffer: string) {
-  const segments: string[] = [];
-  let remaining = buffer;
-  const sentencePattern = /(.+?[.!?](?:["')\]]+)?)(?:\s+|$)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = sentencePattern.exec(buffer)) !== null) {
-    const segment = match[1]?.trim();
-    if (segment) {
-      segments.push(segment);
-    }
-    lastIndex = sentencePattern.lastIndex;
-  }
-
-  remaining = buffer.slice(lastIndex);
-  if (remaining.length > 220) {
-    const pauseIndex = Math.max(remaining.lastIndexOf(", "), remaining.lastIndexOf("; "));
-    if (pauseIndex > 80) {
-      const chunk = remaining.slice(0, pauseIndex + 1).trim();
-      if (chunk) {
-        segments.push(chunk);
-      }
-      remaining = remaining.slice(pauseIndex + 1).trimStart();
-    }
-  }
-
-  return { segments, remaining };
-}
-
-async function playStreamingAudio(
-  response: Response,
-  audio: HTMLAudioElement,
-  onUrl: (url: string | null) => void
-) {
-  const body = response.body;
-  if (
-    !body ||
-    typeof window === "undefined" ||
-    typeof MediaSource === "undefined" ||
-    !MediaSource.isTypeSupported("audio/mpeg")
-  ) {
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    onUrl(url);
-    audio.src = url;
-    await audio.play();
-    await new Promise<void>((resolve) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
-    });
-    return;
-  }
-
-  const mediaSource = new MediaSource();
-  const mediaUrl = URL.createObjectURL(mediaSource);
-  onUrl(mediaUrl);
-  audio.src = mediaUrl;
-
-  await new Promise<void>((resolve, reject) => {
-    mediaSource.addEventListener("sourceopen", () => resolve(), { once: true });
-    mediaSource.addEventListener("error", () => reject(new Error("media source error")), {
-      once: true,
-    });
-  });
-
-  const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
-  const reader = body.getReader();
-  const queue: Uint8Array[] = [];
-  let streamDone = false;
-
-  const flushQueue = () => {
-    if (sourceBuffer.updating || queue.length === 0) {
-      return;
-    }
-    sourceBuffer.appendBuffer(queue.shift() as Uint8Array);
-  };
-
-  sourceBuffer.addEventListener("updateend", () => {
-    flushQueue();
-    if (streamDone && queue.length === 0 && !sourceBuffer.updating && mediaSource.readyState === "open") {
-      try {
-        mediaSource.endOfStream();
-      } catch {
-        // noop
-      }
-    }
-  });
-
-  await audio.play().catch(() => undefined);
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      streamDone = true;
-      if (queue.length === 0 && !sourceBuffer.updating && mediaSource.readyState === "open") {
-        try {
-          mediaSource.endOfStream();
-        } catch {
-          // noop
-        }
-      }
-      break;
-    }
-    if (value) {
-      queue.push(value);
-      flushQueue();
-    }
-  }
-
-  await new Promise<void>((resolve) => {
-    audio.onended = () => resolve();
-    audio.onerror = () => resolve();
-  });
-}
-
 export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
-  const [session, setSession] = useState<SessionData | null>(null);
-  const [bookTitle, setBookTitle] = useState("");
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [activeAgent, setActiveAgent] = useState<string | null>(null);
-  const [playingAudio, setPlayingAudio] = useState(false);
-  const [speakingAgent, setSpeakingAgent] = useState<string | null>(null);
   const [isListening, setIsListening] = useState(false);
-  const [sessionTime, setSessionTime] = useState(0);
   const [selectedCitation, setSelectedCitation] = useState<CitationData | null>(null);
   const [sidebarView, setSidebarView] = useState<SidebarView>("club");
   const [experienceMode, setExperienceMode] = useState<ExperienceMode>("text");
@@ -369,17 +244,48 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [exploreLoading, setExploreLoading] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [highlightSpan, setHighlightSpan] = useState<{ charStart: number; charEnd: number } | null>(null);
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const startedRef = useRef(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioObjectUrlRef = useRef<string | null>(null);
-  const speechQueueRef = useRef<Array<{ text: string; role: string; voice: string }>>([]);
-  const speechRunningRef = useRef(false);
-  const speechBuffersRef = useRef<Record<string, string>>({});
-  const abortRef = useRef<AbortController | null>(null);
+
+  // --- Audio playback hook ---
+  const { playingAudio, speakingAgent, stopAudio, enqueueSpeech } = useAudioPlayback();
+
+  // Bridge: forward sentence-ready events from the session hook to the audio hook
+  const handleSentenceReady = useCallback(
+    (params: { sentence: string; role: string; voice: string }) => {
+      enqueueSpeech(params.sentence, params.role, params.voice);
+    },
+    [enqueueSpeech]
+  );
+
+  // --- Discussion session hook ---
+  const {
+    session,
+    setSession,
+    bookTitle,
+    messages,
+    loading,
+    sending,
+    activeAgent,
+    sessionTime,
+    loadSession,
+    submitMessage: rawSubmitMessage,
+  } = useDiscussionSession({
+    sessionId,
+    experienceMode,
+    onSentenceReady: handleSentenceReady,
+  });
+
+  // Initialize experienceMode and readerSectionId from session once loaded
+  useEffect(() => {
+    if (session) {
+      setExperienceMode(session.preferences?.experience_mode || "text");
+      setReaderSectionId((prev) => prev || session.sections?.[0]?.id || null);
+    }
+  }, [session]);
 
   const activeSectionTitle =
     explore?.active_section?.title || session?.sections?.[0]?.title || null;
@@ -400,38 +306,8 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   );
 
   useEffect(() => {
-    if (!loading && session?.is_active) {
-      const interval = setInterval(() => setSessionTime((value) => value + 1), 1000);
-      return () => clearInterval(interval);
-    }
-  }, [loading, session?.is_active]);
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const cleanupAudioUrl = useCallback(() => {
-    if (audioObjectUrlRef.current) {
-      URL.revokeObjectURL(audioObjectUrlRef.current);
-      audioObjectUrlRef.current = null;
-    }
-  }, []);
-
-  const stopAudio = useCallback(() => {
-    abortRef.current?.abort();
-    speechQueueRef.current = [];
-    speechRunningRef.current = false;
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.src = "";
-      audioRef.current = null;
-    }
-    cleanupAudioUrl();
-    setPlayingAudio(false);
-    setSpeakingAgent(null);
-  }, [cleanupAudioUrl]);
-
-  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
 
   const sendFeedback = useCallback(
     async (messageId: string, feedback: "up" | "down" | null) => {
@@ -443,132 +319,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
           body: JSON.stringify({ feedback }),
         });
       } catch {
-        // Revert on failure
         setMessageFeedback((prev) => ({ ...prev, [messageId]: null }));
       }
     },
     [sessionId]
   );
-
-  const drainSpeechQueue = useCallback(async () => {
-    if (speechRunningRef.current) {
-      return;
-    }
-    speechRunningRef.current = true;
-
-    while (speechQueueRef.current.length > 0) {
-      const next = speechQueueRef.current.shift();
-      if (!next) {
-        continue;
-      }
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      setPlayingAudio(true);
-      setSpeakingAgent(next.role);
-
-      try {
-        const response = await fetch(`${API_BASE}/v1/tts/stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: next.text, voice: next.voice }),
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`TTS request failed: ${response.status}`);
-        }
-
-        const audio = new Audio();
-        audioRef.current = audio;
-        cleanupAudioUrl();
-        await playStreamingAudio(response, audio, (url) => {
-          audioObjectUrlRef.current = url;
-        });
-      } catch (error) {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          console.error("Streaming TTS failed:", error);
-        }
-      } finally {
-        abortRef.current = null;
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current = null;
-        }
-        cleanupAudioUrl();
-        setPlayingAudio(false);
-        setSpeakingAgent(null);
-      }
-    }
-
-    speechRunningRef.current = false;
-  }, [cleanupAudioUrl]);
-
-  const enqueueSpeech = useCallback(
-    (text: string, role: string, voice: string = "nova") => {
-      if (!text.trim()) {
-        return;
-      }
-      speechQueueRef.current.push({ text, role, voice });
-      drainSpeechQueue();
-    },
-    [drainSpeechQueue]
-  );
-
-  const loadSession = useCallback(async () => {
-    try {
-      const [sessionRes, messagesRes] = await Promise.all([
-        fetch(`${API_BASE}/v1/sessions/${sessionId}`),
-        fetch(`${API_BASE}/v1/sessions/${sessionId}/messages`),
-      ]);
-      const sessionData = await sessionRes.json();
-      const messagesData = await messagesRes.json();
-      setSession(sessionData);
-      setExperienceMode(sessionData.preferences?.experience_mode || "text");
-      setMessages(messagesData.messages || []);
-      setReaderSectionId((prev) => prev || sessionData.sections?.[0]?.id || null);
-
-      if (sessionData.book_id) {
-        try {
-          const bookRes = await fetch(`${API_BASE}/v1/books/${sessionData.book_id}`);
-          const bookData = await bookRes.json();
-          setBookTitle(bookData.title || "");
-        } catch {
-          // noop
-        }
-      }
-
-      if ((messagesData.messages || []).length === 0 && !startedRef.current) {
-        startedRef.current = true;
-        setActiveAgent("facilitator");
-        const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/start-discussion`, {
-          method: "POST",
-        });
-        const data = await res.json();
-        if (data.messages) {
-          setMessages(
-            data.messages.map((message: Message, index: number) => ({
-              ...message,
-              id: message.id || `start-${Date.now()}-${index}`,
-              created_at: message.created_at || new Date().toISOString(),
-            }))
-          );
-          if (sessionData.preferences?.experience_mode === "audio" && data.messages[0]?.content) {
-            enqueueSpeech(data.messages[0].content, data.messages[0].role || "facilitator");
-          }
-        }
-        setActiveAgent(null);
-      }
-    } catch (error) {
-      console.error("Failed to load session:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [enqueueSpeech, sessionId]);
-
-  useEffect(() => {
-    loadSession();
-  }, [loadSession]);
 
   useEffect(() => {
     async function loadExplore() {
@@ -597,6 +352,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     }
   }, [highlightSpan]);
 
+  // Cleanup audio on unmount
   useEffect(() => () => stopAudio(), [stopAudio]);
 
   function formatTime(seconds: number) {
@@ -634,192 +390,17 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     }
   }
 
-  async function submitMessage(rawMessage: string) {
-    const messageText = rawMessage.trim();
-    if (!messageText || sending) {
-      return;
-    }
-
-    // Interrupt: stop any playing audio when the user sends a new message
-    if (playingAudio) {
-      stopAudio();
-    }
-
-    const userMessage = messageText;
-    setInput("");
-    setSending(true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `user-${Date.now()}`,
-        role: "user",
-        content: userMessage,
-        citations: null,
-        created_at: new Date().toISOString(),
-      },
-    ]);
-
-    try {
-      const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/message/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: userMessage,
-          include_close_reader: true,
-        }),
-      });
-
-      if (!res.ok || !res.body) {
-        throw new Error(`Streaming failed: ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      const messageIds: Record<string, string> = {};
-      const agentVoices: Record<string, string> = {};
-      let useSentenceEvents = false;
-      let buffer = "";
-      let lastSeenSequence = -1;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() ?? "";
-
-        for (const part of parts) {
-          const lines = part.split("\n").map((line) => line.trim());
-          const dataLine = lines.find((line) => line.startsWith("data: "));
-          if (!dataLine) {
-            continue;
-          }
-
-          let event: any;
-          try {
-            event = JSON.parse(dataLine.slice(6));
-          } catch {
-            continue;
-          }
-
-          const sequence = typeof event.sequence === "number" ? event.sequence : -1;
-          if (sequence > 0 && sequence <= lastSeenSequence) {
-            continue;
-          }
-          if (sequence > 0) {
-            lastSeenSequence = sequence;
-          }
-
-          if (event.type === "message_start") {
-            const role = String(event.role || "assistant");
-            const voice = String(event.voice || "nova");
-            setActiveAgent(role);
-            speechBuffersRef.current[role] = "";
-            // Store voice per agent for fallback client-side TTS
-            agentVoices[role] = voice;
-            const id = `stream-${Date.now()}-${role}`;
-            messageIds[role] = id;
-            setMessages((prev) => [
-              ...prev,
-              {
-                id,
-                role,
-                content: "",
-                citations: null,
-                created_at: new Date().toISOString(),
-              },
-            ]);
-          } else if (event.type === "message_delta") {
-            const role = String(event.role || "assistant");
-            const delta = String(event.delta || "");
-            const id = messageIds[role];
-            if (!id) {
-              continue;
-            }
-            setMessages((prev) =>
-              prev.map((message) =>
-                message.id === id
-                  ? { ...message, content: message.content + delta }
-                  : message
-              )
-            );
-            // NOTE: Audio is now driven by server-side sentence_ready events.
-            // Client-side splitting kept as fallback for older backends.
-            if (experienceMode === "audio" && !useSentenceEvents && delta) {
-              const nextBuffer = `${speechBuffersRef.current[role] || ""}${delta}`;
-              const { segments, remaining } = extractSpeakableSegments(nextBuffer);
-              speechBuffersRef.current[role] = remaining;
-              for (const segment of segments) {
-                enqueueSpeech(segment, role, agentVoices[role] || "nova");
-              }
-            }
-          } else if (event.type === "sentence_ready") {
-            // Server-side sentence splitting for TTS pipelining.
-            // Each event contains a complete sentence ready for TTS.
-            useSentenceEvents = true;
-            if (experienceMode === "audio") {
-              const role = String(event.role || "assistant");
-              const voice = String(event.voice || agentVoices[role] || "nova");
-              const sentence = String(event.sentence || "");
-              if (sentence.trim()) {
-                enqueueSpeech(sentence, role, voice);
-              }
-            }
-          } else if (event.type === "message_end") {
-            const role = String(event.role || "assistant");
-            const id = messageIds[role];
-            const content = String(event.content || "");
-            const citations = Array.isArray(event.citations) ? event.citations : null;
-            if (id) {
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === id
-                    ? { ...message, content, citations }
-                    : message
-                )
-              );
-            }
-            // Only use client-side fallback if no sentence_ready events were received
-            if (experienceMode === "audio" && !useSentenceEvents) {
-              const tail = (speechBuffersRef.current[role] || content).trim();
-              if (tail) {
-                enqueueSpeech(tail, role, agentVoices[role] || "nova");
-              }
-            }
-            delete speechBuffersRef.current[role];
-          } else if (event.type === "agent_error") {
-            const role = String(event.role || "assistant");
-            const id = messageIds[role];
-            if (id) {
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === id
-                    ? {
-                        ...message,
-                        content: `[Agent error: ${event.error}]`,
-                      }
-                    : message
-                )
-              );
-            }
-          } else if (event.type === "done") {
-            setActiveAgent(null);
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Failed to send message:", error);
-    } finally {
-      setSending(false);
-      setActiveAgent(null);
-    }
+  function submitMessage(prompt: string) {
+    return rawSubmitMessage(prompt, {
+      stopAudioBeforeSend: playingAudio ? stopAudio : undefined,
+    });
   }
 
   async function sendMessage() {
-    await submitMessage(input);
+    const messageText = input.trim();
+    if (!messageText) return;
+    setInput("");
+    await submitMessage(messageText);
   }
 
   if (loading) {
