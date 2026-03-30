@@ -468,6 +468,20 @@
   animation: float 20s ease-in-out infinite;
 }
 
+/* Citation highlight in reader panel */
+@keyframes citation-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px hsl(var(--primary) / 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.5);
+  }
+}
+
+mark.animate-pulse-glow {
+  animation: citation-glow 2s ease-in-out 3;
+}
+
 /* Focus ring */
 .focus-ring {
   @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background;
