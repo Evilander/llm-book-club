@@ -10,6 +10,7 @@ import {
   LibraryBig,
   Loader2,
   MessageCircle,
+  PanelRightOpen,
   Quote,
   Send,
   Sparkles,
@@ -18,6 +19,7 @@ import {
   User,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -439,6 +441,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [readerSectionId, setReaderSectionId] = useState<string | null>(null);
   const [explore, setExplore] = useState<ExplorePayload | null>(null);
   const [exploreLoading, setExploreLoading] = useState(false);
+  const [mobileSidebar, setMobileSidebar] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1178,6 +1181,14 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
             <Button type="submit" disabled={sending || !input.trim()}>
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setMobileSidebar(true)}
+              className="lg:hidden shrink-0"
+            >
+              <PanelRightOpen className="h-4 w-4" />
+            </Button>
           </form>
           {isListening ? (
             <div className="mt-2 flex items-center justify-center gap-2 text-xs text-red-400">
@@ -1192,30 +1203,56 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
         </div>
       </div>
 
-      <aside className="glass hidden w-[360px] border-l border-border/50 lg:flex lg:flex-col">
+      {/* Mobile sidebar overlay */}
+      {mobileSidebar && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          onClick={() => setMobileSidebar(false)}
+        />
+      )}
+
+      <aside
+        className={cn(
+          "glass border-l border-border/50 flex-col",
+          "lg:flex lg:w-[360px] lg:relative lg:z-auto",
+          mobileSidebar
+            ? "fixed inset-y-0 right-0 z-50 flex w-[340px] animate-slide-in-right"
+            : "hidden"
+        )}
+      >
         <div className="border-b border-white/10 p-3">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="flex items-center gap-2">
             <Button
-              variant={sidebarView === "club" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSidebarView("club")}
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setMobileSidebar(false)}
+              className="lg:hidden shrink-0"
             >
-              Club
+              <X className="h-4 w-4" />
             </Button>
-            <Button
-              variant={sidebarView === "reader" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSidebarView("reader")}
-            >
-              Reader
-            </Button>
-            <Button
-              variant={sidebarView === "audio" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSidebarView("audio")}
-            >
-              Audio
-            </Button>
+            <div className="grid flex-1 grid-cols-3 gap-2">
+              <Button
+                variant={sidebarView === "club" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSidebarView("club")}
+              >
+                Club
+              </Button>
+              <Button
+                variant={sidebarView === "reader" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSidebarView("reader")}
+              >
+                Reader
+              </Button>
+              <Button
+                variant={sidebarView === "audio" ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSidebarView("audio")}
+              >
+                Audio
+              </Button>
+            </div>
           </div>
         </div>
 
