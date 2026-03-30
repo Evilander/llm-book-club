@@ -1009,7 +1009,9 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                       "max-w-[84%] rounded-3xl px-4 py-3",
                       isUser
                         ? "rounded-tr-md bg-primary text-primary-foreground"
-                        : `rounded-tl-md border ${config.borderColor} ${config.bgColor}`
+                        : `rounded-tl-md border ${config.borderColor} ${config.bgColor}`,
+                      message.role === "close_reader" && "border-l-2 border-l-teal-400/60",
+                      message.role === "skeptic" && "border-l-2 border-l-rose-400/60"
                     )}
                   >
                     {!isUser ? (
@@ -1017,9 +1019,19 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                         <span className={cn("text-xs font-medium", config.color)}>
                           {config.name}
                         </span>
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          {config.subtitle}
-                        </span>
+                        {message.role === "skeptic" ? (
+                          <span className="text-[10px] uppercase tracking-wide text-rose-400/70 font-label bg-rose-500/10 px-1.5 py-0.5 rounded">
+                            counterpoint
+                          </span>
+                        ) : message.role === "close_reader" ? (
+                          <span className="text-[10px] uppercase tracking-wide text-teal-400/70 font-label bg-teal-500/10 px-1.5 py-0.5 rounded">
+                            close read
+                          </span>
+                        ) : (
+                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                            {config.subtitle}
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() =>
