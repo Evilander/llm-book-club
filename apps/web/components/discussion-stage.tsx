@@ -29,89 +29,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { API_BASE, cn } from "@/lib/utils";
-
-interface CitationData {
-  chunk_id: string;
-  text: string;
-  char_start?: number | null;
-  char_end?: number | null;
-  verified?: boolean;
-  match_type?: "exact" | "normalized" | "fuzzy" | null;
-}
-
-interface Message {
-  id: string;
-  role: string;
-  content: string;
-  citations: CitationData[] | null;
-  created_at: string;
-}
-
-interface Section {
-  id: string;
-  title: string | null;
-  section_type: string;
-  order_index: number;
-  reading_time_min: number | null;
-}
-
-interface SessionPreferences {
-  discussion_style?: string | null;
-  vibes?: string[];
-  voice_profile?: string | null;
-  reader_goal?: string | null;
-  experience_mode?: "audio" | "text";
-  desire_lens?: string | null;
-  adult_intensity?: string | null;
-  erotic_focus?: string | null;
-}
-
-interface SessionData {
-  session_id: string;
-  book_id: string;
-  mode: string;
-  current_phase: string;
-  sections: Section[];
-  is_active: boolean;
-  preferences?: SessionPreferences | null;
-}
-
-interface ExploreSection {
-  id: string;
-  title: string | null;
-  section_type: string;
-  order_index: number;
-  reading_time_min: number | null;
-  page_start: number | null;
-  page_end: number | null;
-  preview_text: string;
-}
-
-interface ActiveSection extends ExploreSection {
-  text: string;
-  chunk_count: number;
-  source_refs: string[];
-}
-
-interface AudiobookMatch {
-  path: string;
-  filename: string;
-  extension: string;
-  size_bytes: number;
-  title_guess: string;
-  parent_folder: string | null;
-  match_score: number | null;
-  match_reason: string | null;
-}
-
-interface ExplorePayload {
-  title: string;
-  author: string | null;
-  sections: ExploreSection[];
-  active_section: ActiveSection | null;
-  audiobook_matches: AudiobookMatch[];
-  has_local_audiobook: boolean;
-}
+import type {
+  CitationData,
+  ExplorePayload,
+  Message,
+  SessionData,
+  SessionPreferences,
+} from "@/types/api";
 
 interface DiscussionStageProps {
   sessionId: string;

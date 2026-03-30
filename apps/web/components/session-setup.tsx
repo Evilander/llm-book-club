@@ -18,49 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { API_BASE, cn, formatReadingTime } from "@/lib/utils";
-
-interface ExploreSection {
-  id: string;
-  title: string | null;
-  section_type: string;
-  order_index: number;
-  reading_time_min: number | null;
-  page_start: number | null;
-  page_end: number | null;
-  preview_text: string;
-}
-
-interface ActiveSection extends ExploreSection {
-  text: string;
-  chunk_count: number;
-  source_refs: string[];
-}
-
-interface AudiobookMatch {
-  path: string;
-  filename: string;
-  extension: string;
-  size_bytes: number;
-  title_guess: string;
-  parent_folder: string | null;
-  match_score: number | null;
-  match_reason: string | null;
-}
-
-interface ExplorePayload {
-  book_id: string;
-  title: string;
-  author: string | null;
-  filename: string;
-  file_type: string;
-  total_chars: number | null;
-  source_path: string | null;
-  sections: ExploreSection[];
-  active_section: ActiveSection | null;
-  audiobook_matches: AudiobookMatch[];
-  has_local_audiobook: boolean;
-  audiobooks_dir: string | null;
-}
+import type { ExplorePayload } from "@/types/api";
 
 interface SessionSetupProps {
   bookId: string;

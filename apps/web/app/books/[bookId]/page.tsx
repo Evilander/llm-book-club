@@ -1,6 +1,7 @@
 "use client";
 
 import { use } from "react";
+import { motion } from "motion/react";
 import { SessionSetup } from "@/components/session-setup";
 import { useRouter } from "next/navigation";
 
@@ -13,7 +14,12 @@ export default function BookSetupPage({
   const router = useRouter();
 
   return (
-    <div className="container mx-auto px-4 py-8 animate-fade-up">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: "easeOut" }}
+      className="container mx-auto px-4 py-8"
+    >
       <div className="max-w-4xl mx-auto">
         <SessionSetup
           bookId={bookId}
@@ -23,6 +29,6 @@ export default function BookSetupPage({
           }
         />
       </div>
-    </div>
+    </motion.div>
   );
 }

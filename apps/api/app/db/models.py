@@ -259,6 +259,9 @@ class Message(Base):
     # Extensible metadata (token counts, latency, model, citation verification, etc.)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # User feedback: "up", "down", or null
+    feedback: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     session: Mapped["DiscussionSession"] = relationship("DiscussionSession", back_populates="messages")
