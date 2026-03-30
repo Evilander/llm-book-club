@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
+import { Toaster } from "sonner";
 import { ErrorBoundary } from "@/components/error-boundary";
 import "./globals.css";
 
@@ -35,6 +36,17 @@ export default function RootLayout({
       </head>
       <body className="min-h-screen antialiased">
         <ErrorBoundary>{children}</ErrorBoundary>
+        <Toaster
+          theme="dark"
+          position="bottom-right"
+          toastOptions={{
+            style: {
+              background: "hsl(20 14% 7%)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "hsl(30 10% 94%)",
+            },
+          }}
+        />
       </body>
     </html>
   );

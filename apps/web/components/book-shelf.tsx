@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import {
   Book,
   Upload,
@@ -292,9 +293,15 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch(`${API_BASE}/v1/ingest`, { method: "POST", body: fd });
-      if (res.ok) loadIngested();
+      if (res.ok) {
+        toast.success(`"${file.name}" added to your shelf`);
+        loadIngested();
+      } else {
+        toast.error("Upload failed — try again");
+      }
     } catch (e) {
       console.error("Upload failed:", e);
+      toast.error("Upload failed — check your connection");
     } finally {
       setUploading(false);
     }
@@ -328,10 +335,12 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
           b.path === path ? { ...b, already_ingested: true, book_id: data.book_id } : b
         )
       );
+      toast.success("Book added — ready to discuss");
       loadIngested(true);
     } catch (e) {
       console.error("Local ingest failed:", e);
       setIngesting((prev) => ({ ...prev, [path]: "failed" }));
+      toast.error("Failed to add book — try again");
     }
   }
 
