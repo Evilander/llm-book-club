@@ -426,7 +426,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
   );
 
   return (
-    <div className="space-y-8">
+    <div className={cn("space-y-8", selectedStyle === "sexy" && "after-dark")}>
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={onBack} className="shrink-0">
           <ArrowLeft className="w-5 h-5" />
