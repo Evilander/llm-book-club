@@ -13,6 +13,7 @@ from .agents import (
     FacilitatorAgent,
     CloseReaderAgent,
     SkepticAgent,
+    AfterDarkGuideAgent,
     AgentResponse,
     Citation,
     parse_citations,
@@ -39,6 +40,7 @@ AGENT_VOICES: dict[str, str] = {
     "facilitator": "nova",       # Sam: warm, energetic
     "close_reader": "shimmer",   # Ellis: precise, measured
     "skeptic": "echo",           # Kit: dry, questioning
+    "after_dark_guide": "fable", # Lens specialist: lush, intimate
 }
 
 STYLE_GUIDANCE = {
@@ -119,7 +121,7 @@ def _build_agent_context(
 @dataclass
 class DiscussionTurn:
     """A single turn in the discussion."""
-    role: str  # user, facilitator, close_reader, skeptic
+    role: str  # user, facilitator, close_reader, skeptic, after_dark_guide
     content: str
     citations: list[dict]
 
@@ -128,7 +130,8 @@ class DiscussionEngine:
     """
     Engine for managing multi-agent book discussions.
 
-    Coordinates between user, facilitator, close reader, and skeptic agents.
+    Coordinates between user, facilitator, close reader, skeptic, and the
+    adult-room specialist when active.
     Supports memory-aware discussions when BookMemory is available.
     """
 
@@ -152,7 +155,7 @@ class DiscussionEngine:
         agent_context = _build_agent_context(slice_data.context_text, self.preferences)
 
         # Detect adult mode from session preferences
-        is_adult = (
+        self.is_adult = (
             self.preferences.get("discussion_style") == "sexy"
             or self.preferences.get("experience_mode") == "after_dark"
             or self.preferences.get("desire_lens") is not None
@@ -172,7 +175,7 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
-            adult_mode=is_adult,
+            adult_mode=self.is_adult,
         )
         self.close_reader = CloseReaderAgent(
             llm_client=self.llm,
@@ -183,7 +186,7 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
-            adult_mode=is_adult,
+            adult_mode=self.is_adult,
         )
         self.skeptic = SkepticAgent(
             llm_client=self.llm,
@@ -194,7 +197,18 @@ class DiscussionEngine:
             memory=self.memory,
             allowed_section_ids=self.slice.section_ids,
             allowed_chunk_ids=self.slice.chunk_ids,
-            adult_mode=is_adult,
+            adult_mode=self.is_adult,
+        )
+        self.after_dark_guide = AfterDarkGuideAgent(
+            llm_client=self.llm,
+            db=db,
+            book_id=session.book_id,
+            context=agent_context,
+            mode=self.mode,
+            memory=self.memory,
+            allowed_section_ids=self.slice.section_ids,
+            allowed_chunk_ids=self.slice.chunk_ids,
+            adult_mode=self.is_adult,
         )
 
     def _load_memory_context(self) -> MemoryContext | None:
@@ -434,7 +448,8 @@ class DiscussionEngine:
                       (a cheap classifier decides which agents respond)
 
         Returns:
-            List of agent responses (facilitator, optionally close_reader, optionally skeptic)
+            List of agent responses (facilitator, optionally close_reader,
+            optionally after_dark_guide, optionally skeptic)
         """
         import uuid
 
@@ -499,12 +514,38 @@ class DiscussionEngine:
                 metadata_json=self._citation_metadata(close_reader_response),
             )
             responses.append(close_reader_response)
+            history.append(LLMMessage(role="assistant", content=close_reader_response.content))
+
+        if self.is_adult:
+            guide_history = list(history)
+            if facilitator_response and not include_close_reader:
+                guide_history.append(
+                    LLMMessage(role="assistant", content=facilitator_response.content)
+                )
+
+            with turn_metrics.track_stage("after_dark_guide") as stage:
+                after_dark_response = await self.after_dark_guide.respond_with_retrieval(
+                    guide_history,
+                    query=retrieval_query,
+                )
+                stage.tokens_in = after_dark_response.input_tokens
+                stage.tokens_out = after_dark_response.output_tokens
+            self._save_message(
+                MessageRole.AFTER_DARK_GUIDE,
+                after_dark_response.content,
+                self._serialize_citations(after_dark_response.citations),
+                metadata_json=self._citation_metadata(after_dark_response),
+            )
+            responses.append(after_dark_response)
+            history.append(LLMMessage(role="assistant", content=after_dark_response.content))
 
         # Optionally get skeptic response (only via adaptive selection)
         if include_skeptic:
             # Add previous responses to history for skeptic context
             skeptic_history = list(history)
-            if facilitator_response:
+            if facilitator_response and not any(
+                msg.content == facilitator_response.content for msg in skeptic_history
+            ):
                 skeptic_history.append(
                     LLMMessage(role="assistant", content=facilitator_response.content)
                 )
@@ -596,7 +637,7 @@ class DiscussionEngine:
                 "classification": classification,
             }
 
-        async def stream_agent(agent, role: str):
+        async def stream_agent(agent, role: str, conversation_history: list[LLMMessage] | None = None):
             nonlocal event_seq
 
             voice = AGENT_VOICES.get(role, "nova")
@@ -616,7 +657,10 @@ class DiscussionEngine:
             chunks_list: list[str] = []
             splitter = SentenceSplitter()
             try:
-                async for delta in agent.stream_with_retrieval(history, query=retrieval_query):
+                async for delta in agent.stream_with_retrieval(
+                    conversation_history if conversation_history is not None else history,
+                    query=retrieval_query,
+                ):
                     # Record TTFT on first content delta of the entire turn
                     if not chunks_list and turn_metrics.ttft_ms == 0.0:
                         turn_metrics.record_ttft()
@@ -794,6 +838,8 @@ class DiscussionEngine:
 
         # Stream facilitator (always)
         facilitator_text = None
+        close_reader_text = None
+        after_dark_text = None
         with turn_metrics.track_stage("facilitator") as fac_stage:
             async for event in stream_agent(self.facilitator, "facilitator"):
                 if event["type"] == "message_end":
@@ -807,10 +853,29 @@ class DiscussionEngine:
             if facilitator_text is not None:
                 history.append(LLMMessage(role="assistant", content=facilitator_text))
             with turn_metrics.track_stage("close_reader") as cr_stage:
-                async for event in stream_agent(self.close_reader, "close_reader"):
+                async for event in stream_agent(self.close_reader, "close_reader", history):
                     if event["type"] == "message_end":
+                        close_reader_text = event["content"]
                         cr_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
                         cr_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
+                    yield event
+
+        if self.is_adult:
+            guide_history = list(history)
+            if facilitator_text is not None and not include_close_reader:
+                guide_history.append(LLMMessage(role="assistant", content=facilitator_text))
+            if close_reader_text is not None:
+                guide_history.append(LLMMessage(role="assistant", content=close_reader_text))
+            with turn_metrics.track_stage("after_dark_guide") as ad_stage:
+                async for event in stream_agent(
+                    self.after_dark_guide,
+                    "after_dark_guide",
+                    guide_history,
+                ):
+                    if event["type"] == "message_end":
+                        after_dark_text = event["content"]
+                        ad_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
+                        ad_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
                     yield event
 
         # Stream skeptic if needed (only via adaptive selection)
@@ -818,8 +883,12 @@ class DiscussionEngine:
             # Ensure facilitator context is in history for skeptic
             if facilitator_text is not None and not include_close_reader:
                 history.append(LLMMessage(role="assistant", content=facilitator_text))
+            if close_reader_text is not None:
+                history.append(LLMMessage(role="assistant", content=close_reader_text))
+            if after_dark_text is not None:
+                history.append(LLMMessage(role="assistant", content=after_dark_text))
             with turn_metrics.track_stage("skeptic") as sk_stage:
-                async for event in stream_agent(self.skeptic, "skeptic"):
+                async for event in stream_agent(self.skeptic, "skeptic", history):
                     if event["type"] == "message_end":
                         sk_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
                         sk_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)

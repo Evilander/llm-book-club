@@ -891,3 +891,25 @@ Please offer a thoughtful response that:
 Be curious and constructive, not dismissive."""
 
         return await self.respond([LLMMessage(role="user", content=prompt)])
+
+
+class AfterDarkGuideAgent(BaseAgent):
+    """Adult-room specialist with a trans-feminine erotic reading perspective."""
+
+    agent_type = "after_dark_guide"
+
+    async def amplify_charge(self, passage: str) -> AgentResponse:
+        """Explain the erotic or sensual charge in a passage."""
+        prompt = f"""Please read this passage as the adult-room specialist:
+
+"{passage}"
+
+Focus on:
+- what gives the scene erotic voltage
+- where glamour, self-presentation, vulnerability, or power intensify desire
+- how a trans-feminine perspective changes what is most noticeable
+- why the scene feels hot, dangerous, tender, or self-aware
+
+Stay grounded in the text and cite exact evidence."""
+
+        return await self.respond([LLMMessage(role="user", content=prompt)])
