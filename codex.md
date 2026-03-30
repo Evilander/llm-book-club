@@ -255,7 +255,7 @@ Design system:
 Current observed backend test run in this workspace:
 
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest apps/api/tests -q -p no:typeguard`
-- result: `464 passed, 1 warning`
+- result: `485 passed, 1 warning`
 
 Observed warning:
 
@@ -269,17 +269,17 @@ Frontend checks that have passed in this workspace:
 ## Prioritized Next Tasks (from adversary review, 2026-03-30)
 
 Architecture:
-1. Break God components: extract `useDiscussionSession`, `useAudioPlayback` hooks, `MessageCard`, `ReaderPanel` from 1534-line discussion-stage.tsx
-2. Extract shared types to `apps/web/types/api.ts` (CitationData, ExploreSection, etc. duplicated between components)
-3. Use the installed `motion` package: add AnimatePresence for route transitions, layoutId for shared elements, gesture interactions
-4. Build a session opener transition (5-second "room opening" with cast introduction)
+1. ~~Break God components~~ — IN PROGRESS: `useAudioPlayback` hook extracted, `useDiscussionSession` in progress
+2. ~~Extract shared types~~ — DONE: `apps/web/types/api.ts` created
+3. ~~Use motion library~~ — DONE: page.tsx, book setup, session opener use motion/react
+4. ~~Session opener transition~~ — DONE: cinematic room-opening with staggered cast intro
 
 Product:
-5. Add thumbs up/down on agent responses (zero feedback loops currently)
-6. Replace hero stat cards with personalized "Continue where you left off" recommendation
-7. Make agents visually distinct (different output formats, not just colored borders)
-8. Add time-of-day awareness for ritual feel
-9. Pre-ingest public domain books for zero-upload onboarding
+5. ~~Thumbs up/down~~ — DONE: backend PATCH endpoint + frontend inline buttons + alembic migration
+6. ~~Kill stat cards~~ — DONE: replaced with time-of-day aware greeting
+7. ~~Agent visual distinction~~ — DONE: role-specific border colors + "counterpoint"/"close read" badges
+8. ~~Time-of-day awareness~~ — DONE: morning/afternoon/evening/late-night greetings
+9. ~~Public domain seeder~~ — DONE: `scripts/seed_public_domain.py` (5 Gutenberg novels)
 
 Operations:
 10. Cost dashboard: aggregate token usage from metadata_json, expose via /admin/costs
