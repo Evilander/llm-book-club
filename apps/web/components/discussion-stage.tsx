@@ -13,6 +13,8 @@ import {
   PanelRightOpen,
   Quote,
   Send,
+  ThumbsDown,
+  ThumbsUp,
   Sparkles,
   StopCircle,
   Timer,
@@ -428,6 +430,25 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     setPlayingAudio(false);
     setSpeakingAgent(null);
   }, [cleanupAudioUrl]);
+
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
+
+  const sendFeedback = useCallback(
+    async (messageId: string, feedback: "up" | "down" | null) => {
+      setMessageFeedback((prev) => ({ ...prev, [messageId]: feedback }));
+      try {
+        await fetch(`${API_BASE}/v1/sessions/${sessionId}/messages/${messageId}/feedback`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ feedback }),
+        });
+      } catch {
+        // Revert on failure
+        setMessageFeedback((prev) => ({ ...prev, [messageId]: null }));
+      }
+    },
+    [sessionId]
+  );
 
   const drainSpeechQueue = useCallback(async () => {
     if (speechRunningRef.current) {
@@ -1011,6 +1032,41 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                           className="opacity-60 transition-opacity hover:opacity-100"
                         >
                           <Volume2 className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="flex-1" />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendFeedback(
+                              message.id,
+                              messageFeedback[message.id] === "up" ? null : "up"
+                            )
+                          }
+                          className={cn(
+                            "transition-opacity",
+                            messageFeedback[message.id] === "up"
+                              ? "opacity-100 text-emerald-400"
+                              : "opacity-40 hover:opacity-80"
+                          )}
+                        >
+                          <ThumbsUp className="h-3 w-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendFeedback(
+                              message.id,
+                              messageFeedback[message.id] === "down" ? null : "down"
+                            )
+                          }
+                          className={cn(
+                            "transition-opacity",
+                            messageFeedback[message.id] === "down"
+                              ? "opacity-100 text-red-400"
+                              : "opacity-40 hover:opacity-80"
+                          )}
+                        >
+                          <ThumbsDown className="h-3 w-3" />
                         </button>
                       </div>
                     ) : null}
