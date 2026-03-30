@@ -37,6 +37,10 @@ class MessageRequest(BaseModel):
     adaptive: bool = True  # Use MARS-style adaptive agent selection
 
 
+class MessageFeedbackRequest(BaseModel):
+    feedback: str | None = Field(None, pattern=r"^(up|down)$")
+
+
 class SessionPreferencesUpdateRequest(BaseModel):
     discussion_style: str | None = None
     vibes: list[str] | None = None
@@ -216,10 +220,45 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db)):
                 "role": m.role.value,
                 "content": m.content,
                 "citations": m.citations,
+                "feedback": m.feedback,
                 "created_at": m.created_at.isoformat(),
             }
             for m in messages
         ],
+    }
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}/feedback")
+def update_message_feedback(
+    session_id: str,
+    message_id: str,
+    req: MessageFeedbackRequest,
+    db: Session = Depends(get_db),
+):
+    """Set or clear thumbs up/down feedback on an agent message."""
+    session = db.query(DiscussionSession).filter(DiscussionSession.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    message = (
+        db.query(Message)
+        .filter(Message.id == message_id, Message.session_id == session_id)
+        .first()
+    )
+    if not message:
+        raise HTTPException(404, "Message not found")
+
+    message.feedback = req.feedback
+    db.commit()
+    db.refresh(message)
+
+    return {
+        "id": message.id,
+        "session_id": message.session_id,
+        "role": message.role.value,
+        "content": message.content,
+        "feedback": message.feedback,
+        "created_at": message.created_at.isoformat(),
     }
 
 
