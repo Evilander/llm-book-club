@@ -677,9 +677,13 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
           <div className="mx-auto mb-4 w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center">
             <Book className="w-8 h-8 text-muted-foreground/50" />
           </div>
-          <p className="text-base font-medium mb-1">No books on your shelf yet</p>
-          <p className="text-sm text-muted-foreground">
-            Upload a book above or browse your local library below
+          <p className="text-base font-medium mb-1 font-serif">The shelf is empty — every great room starts here.</p>
+          <p className="text-sm text-muted-foreground mt-2 max-w-md mx-auto">
+            Upload a book above, browse your local library below, or run the
+            seed script to load five classic novels instantly:
+          </p>
+          <p className="mt-3 text-xs font-mono text-muted-foreground bg-secondary/50 inline-block px-3 py-1.5 rounded-lg">
+            python scripts/seed_public_domain.py
           </p>
         </div>
       ) : null}
