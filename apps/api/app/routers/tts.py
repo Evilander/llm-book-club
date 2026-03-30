@@ -1,7 +1,7 @@
 """Text-to-speech endpoints."""
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..providers.tts.factory import get_tts_client
 from ..providers.tts.base import TTSRequest
@@ -9,12 +9,14 @@ from ..discussion.engine import AGENT_VOICES
 
 router = APIRouter(tags=["tts"])
 
+MAX_TTS_TEXT_LENGTH = 5000
+
 
 class SynthesizeRequest(BaseModel):
-    text: str
+    text: str = Field(..., max_length=MAX_TTS_TEXT_LENGTH)
     voice: str | None = None
     provider: str | None = None  # vibevoice|elevenlabs|openai
-    speed: float = 1.0
+    speed: float = Field(1.0, ge=0.25, le=4.0)
 
 
 @router.post("/tts/synthesize")
@@ -38,7 +40,8 @@ async def synthesize_speech(req: SynthesizeRequest):
             )
         )
     except Exception as e:
-        raise HTTPException(500, f"TTS synthesis failed: {e}")
+        print(f"TTS synthesis error: {e}")
+        raise HTTPException(500, "TTS synthesis failed")
 
     return StreamingResponse(
         iter([audio_data]),

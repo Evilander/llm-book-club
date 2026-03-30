@@ -1085,7 +1085,21 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
 
                     {message.content ? (
                       <div className="prose prose-sm prose-invert max-w-none text-sm leading-relaxed prose-p:my-1.5">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            a: ({ href, children }) => (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline decoration-primary/40 hover:decoration-primary"
+                              >
+                                {children}
+                              </a>
+                            ),
+                          }}
+                        >
                           {message.content}
                         </ReactMarkdown>
                       </div>
