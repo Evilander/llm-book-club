@@ -13,6 +13,7 @@ import {
   Sparkles,
   Wand2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -408,10 +409,12 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
       });
       const data = await res.json();
       if (data.session_id) {
+        toast.success(selectedStyle === "sexy" ? "After-dark room opening..." : "Opening your reading room...");
         onStartSession(data.session_id);
       }
     } catch (error) {
       console.error("Failed to start session:", error);
+      toast.error("Failed to open room — try again");
     } finally {
       setStarting(false);
     }
