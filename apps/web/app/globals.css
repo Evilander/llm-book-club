@@ -4,46 +4,53 @@
 
 @layer base {
   :root {
-    /* Modern dark theme with warm accents */
-    --background: 240 10% 4%;
-    --foreground: 0 0% 95%;
+    /* Editorial dark theme — warm stone base, amber accents */
+    --background: 20 14% 4%;
+    --foreground: 30 10% 94%;
 
-    --card: 240 10% 6%;
-    --card-foreground: 0 0% 95%;
+    --card: 20 14% 7%;
+    --card-foreground: 30 10% 94%;
 
-    --popover: 240 10% 6%;
-    --popover-foreground: 0 0% 95%;
+    --popover: 20 14% 7%;
+    --popover-foreground: 30 10% 94%;
 
-    --primary: 24 100% 50%;
+    --primary: 32 95% 44%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 5% 16%;
-    --secondary-foreground: 0 0% 95%;
+    --secondary: 20 6% 15%;
+    --secondary-foreground: 30 10% 94%;
 
-    --muted: 240 5% 12%;
-    --muted-foreground: 240 5% 55%;
+    --muted: 20 6% 11%;
+    --muted-foreground: 24 5% 50%;
 
-    --accent: 24 80% 45%;
+    --accent: 36 93% 50%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 5% 18%;
-    --input: 240 5% 18%;
-    --ring: 24 100% 50%;
+    --border: 20 6% 16%;
+    --input: 20 6% 16%;
+    --ring: 32 95% 44%;
 
     --radius: 0.75rem;
 
     /* Gradient accent colors */
-    --gradient-start: 24 100% 50%;
-    --gradient-end: 330 80% 55%;
+    --gradient-start: 32 95% 44%;
+    --gradient-end: 340 82% 52%;
 
-    /* Agent colors */
-    --agent-facilitator: 24 100% 50%;
-    --agent-close-reader: 142 70% 45%;
-    --agent-skeptic: 270 60% 60%;
-    --agent-user: 210 100% 50%;
+    /* Agent colors — distinct warm/cool separation */
+    --agent-facilitator: 43 96% 56%;
+    --agent-close-reader: 166 72% 50%;
+    --agent-skeptic: 350 89% 60%;
+    --agent-after-dark: 292 84% 61%;
+    --agent-user: 217 91% 60%;
+
+    /* Citation verification */
+    --citation-exact: 160 84% 39%;
+    --citation-normalized: 43 96% 56%;
+    --citation-fuzzy: 48 96% 53%;
+    --citation-unverified: 0 84% 60%;
 
     /* Glassmorphism */
     --glass-bg: rgba(255, 255, 255, 0.03);
@@ -51,24 +58,40 @@
     --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 
+  /* After-dark mode — warmer, rose-tinted, more intimate */
+  .after-dark {
+    --primary: 350 89% 60%;
+    --accent: 292 84% 61%;
+    --ring: 350 89% 60%;
+
+    --gradient-start: 350 89% 60%;
+    --gradient-end: 292 84% 61%;
+
+    --card: 20 20% 6%;
+    --border: 350 30% 18%;
+
+    --glass-bg: rgba(244, 63, 94, 0.04);
+    --glass-border: rgba(244, 63, 94, 0.12);
+  }
+
   .light {
     --background: 40 33% 98%;
-    --foreground: 240 10% 10%;
+    --foreground: 20 14% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 10%;
+    --card-foreground: 20 14% 10%;
 
-    --primary: 24 100% 50%;
+    --primary: 32 95% 44%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 10% 10%;
+    --secondary: 20 5% 96%;
+    --secondary-foreground: 20 14% 10%;
 
-    --muted: 240 5% 92%;
-    --muted-foreground: 240 5% 40%;
+    --muted: 20 5% 92%;
+    --muted-foreground: 20 5% 40%;
 
-    --border: 240 5% 85%;
-    --ring: 24 100% 50%;
+    --border: 20 5% 85%;
+    --ring: 32 95% 44%;
 
     --glass-bg: rgba(255, 255, 255, 0.7);
     --glass-border: rgba(255, 255, 255, 0.5);

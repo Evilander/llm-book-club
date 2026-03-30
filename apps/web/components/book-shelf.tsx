@@ -346,6 +346,7 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
   const readyBooks = filteredIngested.filter((b) => b.ingest_status === "completed");
   const pendingBooks = filteredIngested.filter((b) => b.ingest_status !== "completed");
   const hasMore = localBooks.length < localTotal;
+  const audioReadyBooks = readyBooks.filter((b) => b.has_audiobook).slice(0, 3);
 
   // "Continue Reading" — books with sessions, sorted by most recent session
   const continueReading = readyBooks
@@ -364,6 +365,54 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
 
   return (
     <div className="space-y-10">
+      <div className="grid gap-3 lg:grid-cols-3">
+        <Card className="border-white/10 bg-black/20">
+          <CardContent className="p-5">
+            <p className="text-xs uppercase tracking-[0.24em] text-primary/70 font-label">
+              Continue the heat
+            </p>
+            <p className="mt-2 text-lg font-semibold font-serif">
+              {continueReading.length > 0
+                ? `${continueReading.length} room${continueReading.length === 1 ? "" : "s"} already know your voice.`
+                : "Start a fresh room and let the shelf surprise you."}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              The best sessions feel like returning to an argument, a flirtation, or a line you still cannot stop turning over.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/10 bg-black/20">
+          <CardContent className="p-5">
+            <p className="text-xs uppercase tracking-[0.24em] text-primary/70 font-label">
+              Good for audio
+            </p>
+            <p className="mt-2 text-lg font-semibold font-serif">
+              {audioReadyBooks.length > 0
+                ? `${audioReadyBooks.length} title${audioReadyBooks.length === 1 ? "" : "s"} already have a local audio pairing.`
+                : "The shelf is ready even if tonight stays text-first."}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              Conversational audio works best when you want the room to feel alive while you cook, walk, annotate, or pace.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-white/10 bg-black/20">
+          <CardContent className="p-5">
+            <p className="text-xs uppercase tracking-[0.24em] text-primary/70 font-label">
+              Best use
+            </p>
+            <p className="mt-2 text-lg font-semibold font-serif">
+              Pick a slice, choose a mood, and let the cast make you want one more chapter.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              This works when you want reading to feel social, charged, and intellectually awake instead of dutiful.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Search + compact upload */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">

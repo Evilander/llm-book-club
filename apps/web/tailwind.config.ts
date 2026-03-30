@@ -45,7 +45,14 @@ const config: Config = {
           facilitator: "hsl(var(--agent-facilitator))",
           closeReader: "hsl(var(--agent-close-reader))",
           skeptic: "hsl(var(--agent-skeptic))",
+          afterDark: "hsl(var(--agent-after-dark))",
           user: "hsl(var(--agent-user))",
+        },
+        citation: {
+          exact: "hsl(var(--citation-exact))",
+          normalized: "hsl(var(--citation-normalized))",
+          fuzzy: "hsl(var(--citation-fuzzy))",
+          unverified: "hsl(var(--citation-unverified))",
         },
       },
       borderRadius: {
@@ -56,8 +63,10 @@ const config: Config = {
         "2xl": "calc(var(--radius) + 8px)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-mono)", "monospace"],
+        sans: ["var(--font-sans)", "Inter", "system-ui", "sans-serif"],
+        serif: ["Literata", "Georgia", "serif"],
+        label: ["var(--font-label)", "Space Grotesk", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],
       },
       boxShadow: {
         glow: "0 0 20px hsl(var(--primary) / 0.3)",
