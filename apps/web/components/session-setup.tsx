@@ -480,8 +480,8 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
                     </p>
                     {explore?.active_section?.source_refs?.length ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {explore.active_section.source_refs.slice(0, 3).map((ref) => (
-                          <Badge key={ref} variant="outline">
+                        {explore.active_section.source_refs.slice(0, 3).map((ref, i) => (
+                          <Badge key={`${ref}-${i}`} variant="outline">
                             {ref}
                           </Badge>
                         ))}

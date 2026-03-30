@@ -1,5 +1,6 @@
 """OpenAI embeddings provider."""
 from __future__ import annotations
+import asyncio
 import httpx
 from typing import Any
 
@@ -58,15 +59,24 @@ class OpenAIEmbeddings:
                 if not self.is_local and self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
 
-                response = await client.post(
-                    f"{self.base_url}/embeddings",
-                    headers=headers,
-                    json={
-                        "input": batch,
-                        "model": self.model,
-                    },
-                )
-                response.raise_for_status()
+                for attempt in range(5):
+                    response = await client.post(
+                        f"{self.base_url}/embeddings",
+                        headers=headers,
+                        json={
+                            "input": batch,
+                            "model": self.model,
+                        },
+                    )
+                    if response.status_code == 429:
+                        wait = min(2 ** attempt * 5, 60)
+                        print(f"Rate limited, waiting {wait}s (attempt {attempt + 1}/5)")
+                        await asyncio.sleep(wait)
+                        continue
+                    response.raise_for_status()
+                    break
+                else:
+                    response.raise_for_status()
                 data = response.json()
 
                 # Sort by index to maintain order

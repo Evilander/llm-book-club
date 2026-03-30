@@ -297,7 +297,9 @@ export function BookShelf({ onSelectBook }: BookShelfProps) {
         toast.success(`"${file.name}" added to your shelf`);
         loadIngested();
       } else {
-        toast.error("Upload failed — try again");
+        const err = await res.text().catch(() => "Unknown error");
+        console.error("Upload response:", res.status, err);
+        toast.error(`Upload failed (${res.status}) — try a smaller file or different format`);
       }
     } catch (e) {
       console.error("Upload failed:", e);
