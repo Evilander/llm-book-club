@@ -47,6 +47,7 @@ class MessageRole(str, PyEnum):
     FACILITATOR = "facilitator"
     CLOSE_READER = "close_reader"
     SKEPTIC = "skeptic"
+    AFTER_DARK_GUIDE = "after_dark_guide"
     SYSTEM = "system"
 
 
