@@ -206,6 +206,36 @@ const EXPERIENCE_MODES = [
 
 const TIME_OPTIONS = [10, 15, 20, 30, 45, 60];
 
+const AFTER_DARK_PERSONAS: Record<string, { name: string; angle: string }> = {
+  woman: {
+    name: "Sable",
+    angle: "glamour, feminine confidence, and the erotic precision of being watched",
+  },
+  gay_man: {
+    name: "Lucian",
+    angle: "style, masculine beauty, wit, and charged social chemistry",
+  },
+  trans_woman: {
+    name: "Vesper",
+    angle: "embodiment, self-fashioning, vulnerability, confidence, and becoming",
+  },
+};
+
+const MODE_INVITATIONS: Record<string, string> = {
+  conversation: "A live salon that follows your curiosity without getting sloppy.",
+  deep_dive: "A tighter room that lingers over language, pattern, and craft pressure.",
+  big_picture: "A room that keeps one eye on the page and one on the book's larger architecture.",
+  first_time: "A welcoming room that helps difficult books open up without flattening them.",
+};
+
+const STYLE_INVITATIONS: Record<string, string> = {
+  critical_analysis: "Expect sharper claims, cleaner evidence, and more satisfying disagreement.",
+  fun: "Expect energy, wit, and a feeling that reading well can still be playful.",
+  socratic: "Expect questions that keep opening the page instead of closing it too quickly.",
+  sexy: "Expect a reading room that can admit desire, tension, and appetite without leaving the text behind.",
+  cozy: "Expect warmth, steadiness, and a room you will want to come back to tomorrow night.",
+};
+
 function buildEroticInvitation(
   lens: string,
   intensity: string,
@@ -219,6 +249,59 @@ function buildEroticInvitation(
     EROTIC_FOCUSES.find((item) => item.id === focus)?.label.toLowerCase() || "desire";
 
   return `This room opens the book through a ${lensLabel} perspective with a ${intensityLabel} adult tone, tuned to ${focusLabel}. The goal is not crude shock. It is the kind of charged reading that makes glances, pauses, clothes, power, and confession feel impossible to skim.`;
+}
+
+function buildRoomPromise({
+  mode,
+  style,
+  lens,
+  focus,
+  sectionTitle,
+}: {
+  mode: string;
+  style: string;
+  lens: string;
+  focus: string;
+  sectionTitle: string | null;
+}) {
+  const sectionLead = sectionTitle ? `Tonight's room is anchored in ${sectionTitle}. ` : "";
+  const modeInvitation = MODE_INVITATIONS[mode] || MODE_INVITATIONS.conversation;
+  const styleInvitation = STYLE_INVITATIONS[style] || STYLE_INVITATIONS.critical_analysis;
+
+  if (style === "sexy") {
+    const persona = AFTER_DARK_PERSONAS[lens]?.name || "the after-dark guide";
+    const focusLabel = EROTIC_FOCUSES.find((item) => item.id === focus)?.label.toLowerCase() || "desire";
+    return `${sectionLead}${modeInvitation} ${styleInvitation} ${persona} joins the room to track ${focusLabel}, chemistry, and self-presentation with a hotter but still citation-grounded sensibility.`;
+  }
+
+  return `${sectionLead}${modeInvitation} ${styleInvitation}`;
+}
+
+function buildStarterQuestions({
+  style,
+  sectionTitle,
+  lens,
+}: {
+  style: string;
+  sectionTitle: string | null;
+  lens: string;
+}) {
+  const sectionLead = sectionTitle || "this slice";
+
+  if (style === "sexy") {
+    const persona = AFTER_DARK_PERSONAS[lens]?.name || "the after-dark guide";
+    return [
+      `Ask why ${sectionLead} feels charged instead of merely descriptive.`,
+      `Let ${persona} trace how glamour, posture, clothes, or delay turn into desire.`,
+      `Make the skeptic test whether the erotic reading is genuinely earned by the page.`,
+    ];
+  }
+
+  return [
+    `Ask what detail in ${sectionLead} a casual reader is most likely to miss.`,
+    `Ask Ellis for a close reading and Kit for the strongest objection.`,
+    `Ask what this slice wants you to feel before it tells you what it means.`,
+  ];
 }
 
 export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupProps) {
@@ -316,6 +399,31 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
 
   const topAudiobook = explore?.audiobook_matches?.[0] ?? null;
   const eroticInvitation = buildEroticInvitation(desireLens, adultIntensity, eroticFocus);
+  const previewSection =
+    explore?.sections.find((section) => section.id === previewSectionId) ||
+    explore?.active_section ||
+    null;
+  const afterDarkPersona = AFTER_DARK_PERSONAS[desireLens] || AFTER_DARK_PERSONAS.woman;
+  const roomPromise = useMemo(
+    () =>
+      buildRoomPromise({
+        mode: selectedMode,
+        style: selectedStyle,
+        lens: desireLens,
+        focus: eroticFocus,
+        sectionTitle: previewSection?.title || null,
+      }),
+    [desireLens, eroticFocus, previewSection?.title, selectedMode, selectedStyle]
+  );
+  const starterQuestions = useMemo(
+    () =>
+      buildStarterQuestions({
+        style: selectedStyle,
+        sectionTitle: previewSection?.title || null,
+        lens: desireLens,
+      }),
+    [desireLens, previewSection?.title, selectedStyle]
+  );
 
   return (
     <div className="space-y-8">
@@ -324,7 +432,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div>
-          <h2 className="text-2xl font-bold">Build tonight&apos;s reading room</h2>
+          <h2 className="text-2xl font-bold font-serif">Build tonight&apos;s reading room</h2>
           <p className="text-sm text-muted-foreground">
             Pick the energy, preview the slice, then open the conversation.
           </p>
@@ -337,7 +445,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
             <div className="p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.25em] text-primary/80">
+                  <p className="text-xs uppercase tracking-[0.25em] text-primary/80 font-label">
                     Now staging
                   </p>
                   <h3 className="mt-2 text-2xl font-semibold">
@@ -382,7 +490,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
                   </div>
                 ) : (
                   <>
-                    <p className="mt-3 text-sm leading-7 text-foreground/90">
+                    <p className="mt-3 text-sm leading-7 text-foreground/90 font-serif">
                       {explore?.active_section?.text?.slice(0, 900) ||
                         "Pick a section to preview the text here."}
                       {explore?.active_section?.text &&
@@ -456,15 +564,24 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
         <Card className="overflow-hidden border-rose-500/20 bg-[radial-gradient(circle_at_top_left,rgba(244,63,94,0.18),transparent_40%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.16),transparent_35%),rgba(15,15,20,0.92)]">
           <CardContent className="grid gap-6 p-6 lg:grid-cols-[1.15fr_0.85fr]">
             <div>
-              <p className="text-xs uppercase tracking-[0.28em] text-rose-200/80">
+              <p className="text-xs uppercase tracking-[0.28em] text-rose-200/80 font-label">
                 After-Dark Reading Room
               </p>
-              <h3 className="mt-2 text-2xl font-semibold text-white">
+              <h3 className="mt-2 text-2xl font-semibold text-white font-serif">
                 Build a book conversation with real erotic voltage
               </h3>
               <p className="mt-3 max-w-2xl text-sm leading-7 text-rose-50/85">
                 {eroticInvitation}
               </p>
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+                <p className="text-sm font-medium text-white">
+                  {afterDarkPersona.name} enters this room for {afterDarkPersona.angle}.
+                </p>
+                <p className="mt-2 text-sm leading-6 text-rose-50/75">
+                  The point is not generic dirty talk. It is to make the page feel hotter, stranger,
+                  more vulnerable, and more alive by naming what the text is already doing.
+                </p>
+              </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Badge variant="secondary">{DESIRE_LENSES.find((item) => item.id === desireLens)?.label}</Badge>
                 <Badge variant="secondary">{ADULT_INTENSITIES.find((item) => item.id === adultIntensity)?.label}</Badge>
@@ -544,6 +661,42 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
         </div>
       </div>
 
+      <Card className="overflow-hidden border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(249,115,22,0.16),transparent_30%),rgba(10,10,14,0.9)]">
+        <CardContent className="grid gap-6 p-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div>
+            <p className="text-xs uppercase tracking-[0.28em] text-primary/80 font-label">
+              Why This Session Will Work
+            </p>
+            <h3 className="mt-2 text-2xl font-semibold text-white font-serif">
+              A room built to make reading harder to abandon
+            </h3>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-white/80">
+              {roomPromise}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge variant="secondary">{MODES.find((mode) => mode.id === selectedMode)?.name}</Badge>
+              <Badge variant="secondary">{STYLE_OPTIONS.find((style) => style.id === selectedStyle)?.label}</Badge>
+              <Badge variant="secondary">{readerGoal}</Badge>
+              <Badge variant="secondary">{experienceMode === "audio" ? "Live audio room" : "Text room"}</Badge>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/25 p-5">
+            <p className="text-sm font-medium text-white">First questions worth asking</p>
+            <div className="mt-4 space-y-3">
+              {starterQuestions.map((question) => (
+                <div
+                  key={question}
+                  className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm leading-6 text-white/85"
+                >
+                  {question}
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <Card className="border-white/10 bg-card/80">
           <CardContent className="p-5">
@@ -610,6 +763,12 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
                   of these characterful points of view. The conversation stays tasteful,
                   consensual, and citation-grounded.
                 </p>
+                <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">{afterDarkPersona.name}</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    Current angle: {afterDarkPersona.angle}.
+                  </p>
+                </div>
                 <div className="mt-4 space-y-2">
                   {DESIRE_LENSES.map((lens) => (
                     <button

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -118,7 +118,12 @@ interface DiscussionStageProps {
 
 type SidebarView = "club" | "reader" | "audio";
 type ExperienceMode = "audio" | "text";
-type AgentRole = "facilitator" | "close_reader" | "skeptic" | "user";
+type AgentRole =
+  | "facilitator"
+  | "close_reader"
+  | "skeptic"
+  | "after_dark_guide"
+  | "user";
 
 const agentConfig: Record<
   AgentRole,
@@ -163,6 +168,14 @@ const agentConfig: Record<
     bgColor: "bg-rose-500/10",
     borderColor: "border-rose-500/30",
   },
+  after_dark_guide: {
+    name: "After dark",
+    subtitle: "erotic lens",
+    icon: Sparkles,
+    color: "text-fuchsia-300",
+    bgColor: "bg-fuchsia-500/10",
+    borderColor: "border-fuchsia-500/30",
+  },
 };
 
 const eroticFocusNotes: Record<string, string> = {
@@ -173,7 +186,34 @@ const eroticFocusNotes: Record<string, string> = {
   transgression: "Look for secrecy, risk, taboo, and every moment where crossing the line sharpens the charge.",
 };
 
-function getAgentConfig(role: string) {
+const afterDarkPersonas: Record<string, { name: string; subtitle: string }> = {
+  woman: { name: "Sable", subtitle: "after-dark guide" },
+  gay_man: { name: "Lucian", subtitle: "after-dark guide" },
+  trans_woman: { name: "Vesper", subtitle: "after-dark guide" },
+};
+
+const agentVoiceMap: Record<string, string> = {
+  facilitator: "nova",
+  close_reader: "shimmer",
+  skeptic: "echo",
+  after_dark_guide: "fable",
+};
+
+function formatPreferenceLabel(value: string | null | undefined) {
+  return value ? value.replace(/_/g, " ") : "";
+}
+
+function getAgentConfig(role: string, preferences?: SessionPreferences | null) {
+  if (role === "after_dark_guide") {
+    const lens = preferences?.desire_lens || "";
+    const persona = afterDarkPersonas[lens];
+    return {
+      ...agentConfig.after_dark_guide,
+      name: persona?.name || agentConfig.after_dark_guide.name,
+      subtitle: persona?.subtitle || agentConfig.after_dark_guide.subtitle,
+    };
+  }
+
   return (
     agentConfig[role as AgentRole] || {
       name: role,
@@ -184,6 +224,52 @@ function getAgentConfig(role: string) {
       borderColor: "border-border",
     }
   );
+}
+
+function buildRoomInvitation(
+  session: SessionData | null,
+  activeSectionTitle: string | null
+) {
+  if (!session) {
+    return "A live reading room that can move from delight to argument without losing the page.";
+  }
+
+  const mode = formatPreferenceLabel(session.mode);
+  const style = formatPreferenceLabel(session.preferences?.discussion_style) || "thoughtful";
+  const sectionLabel = activeSectionTitle ? ` around ${activeSectionTitle}` : "";
+
+  if (session.preferences?.discussion_style === "sexy") {
+    const persona =
+      afterDarkPersonas[session.preferences?.desire_lens || ""]?.name || "the after-dark guide";
+    const focus = formatPreferenceLabel(session.preferences?.erotic_focus) || "desire";
+    const intensity = formatPreferenceLabel(session.preferences?.adult_intensity) || "frank";
+    return `${persona} joins Sam, Ellis, and Kit for a ${intensity} after-dark ${mode} that stays citation-grounded${sectionLabel}. Expect real critical pressure, real appetite, and a close read of where ${focus} becomes impossible to ignore.`;
+  }
+
+  return `This ${style} ${mode} keeps the room lively${sectionLabel}: Sam moves the conversation, Ellis slows down for craft, and Kit makes sure every strong claim actually earns its place on the page.`;
+}
+
+function buildDiscussionSparkDeck(
+  session: SessionData | null,
+  activeSectionTitle: string | null
+) {
+  const sectionNoun = activeSectionTitle || "this section";
+
+  if (session?.preferences?.discussion_style === "sexy") {
+    return [
+      `Where is the erotic voltage actually coming from in ${sectionNoun}: gaze, delay, clothes, power, or something else?`,
+      `Give me the hottest reading of ${sectionNoun}, then make the skeptic pressure-test it with evidence.`,
+      `What makes ${sectionNoun} feel dangerous, tender, or impossible to skim?`,
+      `Have the after-dark guide trace how desire and self-presentation braid together in ${sectionNoun}.`,
+    ];
+  }
+
+  return [
+    `What is the one detail in ${sectionNoun} that a first-time reader is most likely to miss?`,
+    `Give me one close-reading insight, one skeptical challenge, and one question worth carrying forward.`,
+    `What is ${sectionNoun} trying to make me feel before it tells me what to think?`,
+    `Push the room past summary. What on the page is doing the real work here?`,
+  ];
 }
 
 function VoiceWaves({ active }: { active: boolean }) {
@@ -363,6 +449,24 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const speechRunningRef = useRef(false);
   const speechBuffersRef = useRef<Record<string, string>>({});
   const abortRef = useRef<AbortController | null>(null);
+
+  const activeSectionTitle =
+    explore?.active_section?.title || session?.sections?.[0]?.title || null;
+  const roomInvitation = useMemo(
+    () => buildRoomInvitation(session, activeSectionTitle),
+    [activeSectionTitle, session]
+  );
+  const sparkDeck = useMemo(
+    () => buildDiscussionSparkDeck(session, activeSectionTitle),
+    [activeSectionTitle, session]
+  );
+  const visibleRoles = useMemo(
+    () =>
+      session?.preferences?.discussion_style === "sexy"
+        ? (["facilitator", "close_reader", "after_dark_guide", "skeptic"] as const)
+        : (["facilitator", "close_reader", "skeptic"] as const),
+    [session?.preferences?.discussion_style]
+  );
 
   useEffect(() => {
     if (!loading && session?.is_active) {
@@ -574,8 +678,9 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     }
   }
 
-  async function sendMessage() {
-    if (!input.trim() || sending) {
+  async function submitMessage(rawMessage: string) {
+    const messageText = rawMessage.trim();
+    if (!messageText || sending) {
       return;
     }
 
@@ -584,7 +689,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
       stopAudio();
     }
 
-    const userMessage = input.trim();
+    const userMessage = messageText;
     setInput("");
     setSending(true);
     setMessages((prev) => [
@@ -757,6 +862,10 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     }
   }
 
+  async function sendMessage() {
+    await submitMessage(input);
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -768,8 +877,10 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     );
   }
 
+  const isAfterDark = session?.preferences?.discussion_style === "sexy";
+
   return (
-    <div className="flex h-full min-w-0">
+    <div className={cn("flex h-full min-w-0", isAfterDark && "after-dark")}
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="glass border-b border-border/50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -858,7 +969,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
               <VoiceWaves active={playingAudio || sending} />
               <span>
                 {playingAudio && speakingAgent
-                  ? `${getAgentConfig(speakingAgent).name} is speaking...`
+                  ? `${getAgentConfig(speakingAgent, session?.preferences).name} is speaking...`
                   : playingAudio
                     ? "Speaking..."
                     : "Sentence-by-sentence audio — agents speak as they think."}
@@ -877,12 +988,53 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
               </p>
             </div>
           ) : null}
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.28em] text-primary/80 font-label">
+                Live salon
+              </p>
+              <p className="mt-2 text-sm leading-6 text-foreground/90">{roomInvitation}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="secondary">{visibleRoles.length} voices live</Badge>
+                <Badge variant="secondary">
+                  {session?.sections?.length || 0} section
+                  {session?.sections?.length === 1 ? "" : "s"}
+                </Badge>
+                {activeSectionTitle ? <Badge variant="outline">{activeSectionTitle}</Badge> : null}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/15 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground font-label">
+                  Conversation sparks
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  Tap to send now
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {sparkDeck.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={sending}
+                    onClick={() => void submitMessage(prompt)}
+                    className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-left text-xs leading-5 text-foreground/85 transition-colors hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-5">
           <div className="mx-auto max-w-4xl space-y-4">
             {messages.map((message) => {
-              const config = getAgentConfig(message.role);
+              const config = getAgentConfig(message.role, session?.preferences);
               const isUser = message.role === "user";
               const Icon = config.icon;
               return (
@@ -914,7 +1066,13 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                         </span>
                         <button
                           type="button"
-                          onClick={() => enqueueSpeech(message.content, message.role)}
+                          onClick={() =>
+                            enqueueSpeech(
+                              message.content,
+                              message.role,
+                              agentVoiceMap[message.role] || "nova"
+                            )
+                          }
                           className="opacity-60 transition-opacity hover:opacity-100"
                         >
                           <Volume2 className="h-3.5 w-3.5" />
@@ -953,15 +1111,17 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                                 className={cn(
                                   "mt-1 inline-block h-2 w-2 shrink-0 rounded-full",
                                   citation.verified === false
-                                    ? "bg-red-400"
+                                    ? "bg-citation-unverified"
                                     : citation.match_type === "exact"
-                                      ? "bg-emerald-400"
-                                      : "bg-amber-400"
+                                      ? "bg-citation-exact"
+                                      : citation.match_type === "fuzzy"
+                                        ? "bg-citation-fuzzy"
+                                        : "bg-citation-normalized"
                                 )}
                               />
-                              <span className="line-clamp-2 italic">
-                                "{citation.text}"{" "}
-                                <span className="not-italic text-muted-foreground">
+                              <span className="line-clamp-2 italic font-serif">
+                                &ldquo;{citation.text}&rdquo;{" "}
+                                <span className="not-italic text-muted-foreground font-label text-[10px]">
                                   {citationLabel(citation)}
                                 </span>
                               </span>
@@ -981,7 +1141,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
                 </div>
                 <div className="rounded-3xl rounded-tl-md border border-white/10 bg-black/10 px-4 py-3 text-sm text-muted-foreground">
-                  {getAgentConfig(activeAgent).name} is composing a reply...
+                  {getAgentConfig(activeAgent, session?.preferences).name} is composing a reply...
                 </div>
               </div>
             ) : null}
@@ -1024,7 +1184,11 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
               <VoiceWaves active />
               <span>Listening...</span>
             </div>
-          ) : null}
+          ) : (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Need a nudge? Fire one of the conversation sparks above and let the room answer in real time.
+            </p>
+          )}
         </div>
       </div>
 
@@ -1058,6 +1222,28 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
         <div className="flex-1 overflow-y-auto p-4">
           {sidebarView === "club" ? (
             <div className="space-y-5">
+              <Card className="border-white/10 bg-black/10">
+                <CardContent className="p-4">
+                  <p className="text-sm font-medium text-white">Room pulse</p>
+                  <p className="mt-2 text-sm leading-6 text-foreground/80">
+                    {roomInvitation}
+                  </p>
+                  <div className="mt-4 space-y-2">
+                    {sparkDeck.slice(0, 3).map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        disabled={sending}
+                        onClick={() => void submitMessage(prompt)}
+                        className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-3 text-left text-xs leading-5 text-foreground/85 transition-colors hover:border-primary/40 hover:bg-primary/10 disabled:opacity-50"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
               {session?.preferences?.discussion_style === "sexy" ? (
                 <Card className="border-rose-500/20 bg-rose-500/5">
                   <CardContent className="p-4">
@@ -1121,8 +1307,8 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
               <div>
                 <h3 className="mb-3 text-sm font-semibold">Book club voices</h3>
                 <div className="space-y-2">
-                  {(["facilitator", "close_reader", "skeptic"] as const).map((role) => {
-                    const config = agentConfig[role];
+                  {visibleRoles.map((role) => {
+                    const config = getAgentConfig(role, session?.preferences);
                     const Icon = config.icon;
                     return (
                       <div
@@ -1195,7 +1381,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                       <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                         {explore?.active_section?.title || "Section preview"}
                       </p>
-                      <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/90">
+                      <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/90 font-serif">
                         {explore?.active_section?.text || "Pick a section to open the text here."}
                       </p>
                     </>
