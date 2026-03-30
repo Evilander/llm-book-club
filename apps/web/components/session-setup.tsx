@@ -204,6 +204,24 @@ const EXPERIENCE_MODES = [
   },
 ];
 
+const AUTONOMY_LEVELS = [
+  {
+    id: "guided",
+    label: "Guided",
+    description: "Agents pause after each turn for your input before continuing.",
+  },
+  {
+    id: "conversational",
+    label: "Conversational",
+    description: "Agents take 2-3 turns between your prompts. The default balance.",
+  },
+  {
+    id: "salon",
+    label: "Salon",
+    description: "Agents discuss freely for 5-8 turns. You can interrupt anytime.",
+  },
+];
+
 const TIME_OPTIONS = [10, 15, 20, 30, 45, 60];
 
 const AFTER_DARK_PERSONAS: Record<string, { name: string; angle: string }> = {
@@ -317,6 +335,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
   const [adultIntensity, setAdultIntensity] = useState("frank");
   const [eroticFocus, setEroticFocus] = useState("longing");
   const [adultConfirmed, setAdultConfirmed] = useState(false);
+  const [autonomyLevel, setAutonomyLevel] = useState("conversational");
   const [timeBudget, setTimeBudget] = useState(20);
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
   const [previewSectionId, setPreviewSectionId] = useState<string | null>(null);
@@ -381,6 +400,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
           voice_profile: voiceProfile,
           vibes: [selectedStyle, readerGoal],
           experience_mode: experienceMode,
+          autonomy_level: autonomyLevel,
           desire_lens: selectedStyle === "sexy" ? desireLens : null,
           adult_intensity: selectedStyle === "sexy" ? adultIntensity : null,
           erotic_focus: selectedStyle === "sexy" ? eroticFocus : null,
@@ -919,6 +939,35 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
             </CardContent>
           </Card>
 
+          <Card className="border-white/10 bg-card/80">
+            <CardContent className="p-5">
+              <h3 className="text-lg font-semibold">Room autonomy</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                How much should the agents discuss on their own between your turns?
+              </p>
+              <div className="mt-4 space-y-2">
+                {AUTONOMY_LEVELS.map((level) => (
+                  <button
+                    key={level.id}
+                    type="button"
+                    onClick={() => setAutonomyLevel(level.id)}
+                    className={cn(
+                      "w-full rounded-2xl border px-4 py-3 text-left transition-colors",
+                      autonomyLevel === level.id
+                        ? "border-primary/50 bg-primary/10"
+                        : "border-white/10 bg-black/10 hover:border-primary/30"
+                    )}
+                  >
+                    <p className="font-medium">{level.label}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {level.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="border-white/10 bg-gradient-to-br from-primary/10 to-transparent">
             <CardContent className="p-5">
               <p className="text-sm font-medium text-primary">Tonight&apos;s mix</p>
@@ -943,6 +992,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
                 <Badge variant="secondary">{readerGoal}</Badge>
                 <Badge variant="secondary">{voiceProfile}</Badge>
                 <Badge variant="secondary">{experienceMode}</Badge>
+                <Badge variant="secondary">{AUTONOMY_LEVELS.find((l) => l.id === autonomyLevel)?.label || "Conversational"}</Badge>
               </div>
               <p className="mt-4 text-sm text-muted-foreground">
                 The discussion stays grounded in citations, but the room can feel

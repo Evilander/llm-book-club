@@ -442,8 +442,10 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [explore, setExplore] = useState<ExplorePayload | null>(null);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
+  const [highlightSpan, setHighlightSpan] = useState<{ charStart: number; charEnd: number } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const startedRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -643,6 +645,12 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
 
     loadExplore();
   }, [readerSectionId, session?.book_id]);
+
+  useEffect(() => {
+    if (highlightSpan && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [highlightSpan]);
 
   useEffect(() => () => stopAudio(), [stopAudio]);
 
@@ -1120,7 +1128,14 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                               type="button"
                               onClick={() => {
                                 setSelectedCitation(citation);
-                                setSidebarView("club");
+                                if (citation.char_start != null && citation.char_end != null) {
+                                  setHighlightSpan({ charStart: citation.char_start, charEnd: citation.char_end });
+                                  setSidebarView("reader");
+                                  setMobileSidebar(true);
+                                } else {
+                                  setSidebarView("club");
+                                  setMobileSidebar(true);
+                                }
                               }}
                               className="flex w-full items-start gap-2 rounded-xl px-2 py-1 text-left text-xs transition-colors hover:bg-black/10"
                             >
@@ -1433,7 +1448,25 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                         {explore?.active_section?.title || "Section preview"}
                       </p>
                       <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/90 font-serif">
-                        {explore?.active_section?.text || "Pick a section to open the text here."}
+                        {explore?.active_section?.text ? (
+                          highlightSpan ? (
+                            <>
+                              {explore.active_section.text.slice(0, highlightSpan.charStart)}
+                              <mark
+                                ref={highlightRef}
+                                className="bg-primary/25 text-foreground rounded px-0.5 ring-2 ring-primary/40 animate-pulse-glow"
+                                onClick={() => setHighlightSpan(null)}
+                              >
+                                {explore.active_section.text.slice(highlightSpan.charStart, highlightSpan.charEnd)}
+                              </mark>
+                              {explore.active_section.text.slice(highlightSpan.charEnd)}
+                            </>
+                          ) : (
+                            explore.active_section.text
+                          )
+                        ) : (
+                          "Pick a section to open the text here."
+                        )}
                       </p>
                     </>
                   )}
