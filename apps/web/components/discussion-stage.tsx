@@ -880,7 +880,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const isAfterDark = session?.preferences?.discussion_style === "sexy";
 
   return (
-    <div className={cn("flex h-full min-w-0", isAfterDark && "after-dark")}
+    <div className={cn("flex h-full min-w-0", isAfterDark && "after-dark")}>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="glass border-b border-border/50 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
