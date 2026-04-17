@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
-from ..providers.llm.base import LLMClient, LLMMessage, LLMResponse
+from ..providers.llm.base import (
+    EVIDENCE_CACHE_BOUNDARY,
+    LLMClient,
+    LLMMessage,
+    LLMResponse,
+)
 from ..retrieval.search import search_chunks, SearchResult
 from ..retrieval.filters import build_evidence_block, flag_suspicious_chunks
 from ..settings import settings
@@ -28,7 +33,8 @@ class Citation:
     char_start: int | None = None
     char_end: int | None = None
     verified: bool = False
-    match_type: str | None = None  # "exact", "normalized", "fuzzy", None
+    match_type: str | None = None  # "exact", "normalized", "near_match", None
+    match_score: float | None = None
 
 
 @dataclass
@@ -289,7 +295,7 @@ def parse_response_auto(text: str) -> tuple[str, list[dict]]:
 def verify_citations(
     db: Session,
     citations: list[dict],
-    fuzzy_threshold: float = 0.8,
+    fuzzy_threshold: float = 0.95,
     allowed_chunk_ids: list[str] | set[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """
@@ -389,7 +395,12 @@ def verify_citations(
             })
             continue
 
-        # Fuzzy word-overlap fallback (no span alignment possible)
+        # High-overlap word-set fallback. This is a WEAK signal: word-set is
+        # order-free and dedups tokens, so fabricated paraphrase can pass a
+        # low threshold. We keep it only as a "near_match" hint with
+        # verified=False — the UI can render it as a candidate, but server
+        # callers that enforce grounding must only trust match_type in
+        # {"exact", "normalized"}.
         chunk_text_normalized = normalize_text(chunk.text)
         quote_normalized = normalize_text(quoted_text)
         quote_words = set(quote_normalized.split())
@@ -398,13 +409,14 @@ def verify_citations(
         if len(quote_words) > 0:
             overlap = len(quote_words & chunk_words) / len(quote_words)
             if overlap >= fuzzy_threshold:
-                verified.append({
+                invalid.append({
                     **citation,
                     "char_start": None,
                     "char_end": None,
-                    "verified": True,
-                    "match_type": "fuzzy",
+                    "verified": False,
+                    "match_type": "near_match",
                     "match_score": overlap,
+                    "reason": "high word overlap but no contiguous span match",
                 })
                 continue
 
@@ -744,7 +756,10 @@ class BaseAgent:
 
         enhanced_system = self.system_prompt
         if additional_context:
-            enhanced_system += additional_context
+            # Insert the cache boundary so providers that support prompt
+            # caching (Anthropic) keep the stable personality prefix cached
+            # across turns while only the evidence block changes.
+            enhanced_system += EVIDENCE_CACHE_BOUNDARY + additional_context
 
         messages = [
             LLMMessage(role="system", content=enhanced_system),
@@ -814,7 +829,7 @@ class BaseAgent:
 
         enhanced_system = self.system_prompt
         if additional_context:
-            enhanced_system += additional_context
+            enhanced_system += EVIDENCE_CACHE_BOUNDARY + additional_context
 
         messages = [
             LLMMessage(role="system", content=enhanced_system),

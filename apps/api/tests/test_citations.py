@@ -7,7 +7,6 @@ Covers:
   - compute_span_alignment (character-offset span location)
   - citation-to-section-slice validation
 """
-import pytest
 import uuid
 
 from app.discussion.agents import (
@@ -230,22 +229,13 @@ class TestVerifyCitations:
         verified, invalid = verify_citations(mock_db, citations)
         assert len(verified) == 1
 
-    def test_fuzzy_match_threshold(self, mock_db, sample_book):
-        """A quote where most words overlap but it is not an exact substring
-        should be verified as fuzzy if it meets the threshold.
-
-        NOTE: normalize_text does NOT strip punctuation, so 'ribbon,'
-        in the chunk differs from 'ribbon' in the quote. We pick words
-        that appear exactly (after lowercasing) in the normalized chunk text.
+    def test_high_overlap_reports_near_match_not_verified(self, mock_db, sample_book):
+        """High word-set overlap without a contiguous span should be flagged
+        as near_match but NOT marked verified. Word-set overlap is too weak
+        a signal to trust as grounding — fabricated paraphrase can hit 80%
+        without quoting anything.
         """
         chunk = sample_book["chunks"][2]
-        # Normalized chunk words include: the, river, wound, through, the,
-        # valley, like, a, silver, its, waters, carrying, the, stories,
-        # of, a, thousand, on, its, the, willows
-        # (punctuated forms: "ribbon," "years." "banks," "wept." won't match
-        #  their bare forms)
-        # We pick 10 words from the chunk that appear without trailing punctuation
-        # and add 2 that don't exist -> 10/12 = 83% overlap > 80% threshold
         citations = [
             {
                 "chunk_id": chunk.id,
@@ -253,28 +243,12 @@ class TestVerifyCitations:
             }
         ]
         verified, invalid = verify_citations(mock_db, citations)
-        # 10 out of 12 unique words overlap (>= 0.8), so should pass as fuzzy
-        # But first check: is it an exact normalized substring? No, because it
-        # has NONEXISTENT words. And it's not a contiguous substring either.
-        if len(verified) == 1:
-            assert verified[0]["match_type"] == "fuzzy"
-        else:
-            # If it didn't pass, the word overlap might be below threshold
-            # due to normalization details; verify by checking the actual overlap
-            norm_chunk = normalize_text(chunk.text)
-            quote = "the river wound through the valley like a silver waters carrying stories NONEXISTENT1 NONEXISTENT2"
-            norm_quote = normalize_text(quote)
-            quote_words = set(norm_quote.split())
-            chunk_words = set(norm_chunk.split())
-            overlap = len(quote_words & chunk_words) / len(quote_words)
-            # If overlap < 0.8, adjust the test expectation
-            if overlap < 0.8:
-                pytest.skip(
-                    f"Fuzzy overlap {overlap:.2f} below threshold 0.8; "
-                    "adjust test quote"
-                )
-            else:
-                pytest.fail(f"Expected fuzzy match with {overlap:.2f} overlap")
+        # Must never land in verified — only exact/normalized may do so.
+        assert verified == []
+        # If overlap crossed the (tight) threshold it comes back as near_match.
+        if invalid and invalid[0].get("match_type") == "near_match":
+            assert invalid[0]["verified"] is False
+            assert invalid[0].get("match_score", 0) >= 0.95
 
     def test_reject_chunk_outside_allowed_slice(self, mock_db, sample_book):
         """A valid quote should still fail if the chunk is outside the session slice."""

@@ -40,3 +40,24 @@ def get_llm_client(provider: str | None = None) -> LLMClient:
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
+
+
+def get_fast_llm_client(provider: str | None = None) -> LLMClient:
+    """
+    Get a cheap / fast LLM client suitable for routing, classification,
+    and summary work — the kinds of calls where the flagship model is
+    overkill. Falls back to ``get_llm_client`` when a cheap tier is not
+    configured for the active provider or when FAST_LLM_ENABLED is false.
+    """
+    if not settings.fast_llm_enabled:
+        return get_llm_client(provider)
+
+    provider = (provider or settings.llm_provider).lower()
+
+    if provider in ("claude", "anthropic"):
+        return AnthropicClient(model=settings.anthropic_fast_model)
+    if provider == "openai":
+        return OpenAIClient(model=settings.openai_fast_model)
+    # Other providers don't have a well-known cheap tier here; reuse the
+    # primary client.
+    return get_llm_client(provider)

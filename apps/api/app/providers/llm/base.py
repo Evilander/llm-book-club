@@ -3,6 +3,14 @@ from dataclasses import dataclass
 from typing import Protocol, AsyncIterator
 
 
+# Sentinel marker inserted between the stable agent system prefix and any
+# per-turn retrieval evidence. Providers that support prompt caching
+# (AnthropicClient) split the system string on this marker so the stable
+# prefix can be cached across turns while evidence varies. Callers that
+# don't split on it see it as harmless text.
+EVIDENCE_CACHE_BOUNDARY = "<<<__EVIDENCE_CACHE_BOUNDARY__>>>"
+
+
 @dataclass
 class LLMMessage:
     """A message in a conversation."""

@@ -15,7 +15,7 @@ class OpenAIClient:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gpt-4o",
+        model: str = "gpt-4.1",
         base_url: str = "https://api.openai.com/v1",
     ):
         self.api_key = api_key or settings.openai_api_key
