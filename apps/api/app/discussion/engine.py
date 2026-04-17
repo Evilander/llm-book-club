@@ -6,7 +6,7 @@ from typing import AsyncIterator
 from sqlalchemy.orm import Session
 
 from ..db import DiscussionSession, Message, MessageRole, DiscussionMode, BookMemory, ReadingUnit
-from ..providers.llm.factory import get_llm_client
+from ..providers.llm.factory import get_fast_llm_client, get_llm_client
 from ..providers.llm.base import LLMMessage
 from ..retrieval.selector import select_session_slice, SessionSlice
 from .agents import (
@@ -154,16 +154,25 @@ class DiscussionEngine:
         self.preferences = session.preferences_json or {}
         agent_context = _build_agent_context(slice_data.context_text, self.preferences)
 
-        # Detect adult mode from session preferences
-        self.is_adult = (
+        # Detect adult mode from session preferences, gated by the server-side
+        # 18+ confirmation recorded on the session row. If someone mutates
+        # preferences after the fact via PATCH without also confirming, the
+        # adult-room agent stays off.
+        prefs_request_adult = (
             self.preferences.get("discussion_style") == "sexy"
             or self.preferences.get("experience_mode") == "after_dark"
             or self.preferences.get("desire_lens") is not None
             or self.preferences.get("adult_intensity") is not None
+            or self.preferences.get("erotic_focus") is not None
+        )
+        self.is_adult = prefs_request_adult and bool(
+            getattr(session, "adult_confirmed", False)
         )
 
-        # Initialize LLM client
+        # Initialize LLM client (primary). A cheaper tier is used for
+        # routing / summary work via ``self.fast_llm``.
         self.llm = get_llm_client()
+        self.fast_llm = get_fast_llm_client()
 
         # Initialize agents with memory context and adult mode overlay
         self.facilitator = FacilitatorAgent(
@@ -280,7 +289,9 @@ class DiscussionEngine:
                 ),
                 LLMMessage(role="user", content=classify_prompt),
             ]
-            response = await self.llm.complete(
+            # Cheap tier — this is a tiny JSON classifier, Opus/Sonnet is
+            # massive overkill and slows down the turn's TTFT.
+            response = await self.fast_llm.complete(
                 messages, temperature=0.0, max_tokens=150
             )
 
@@ -379,6 +390,7 @@ class DiscussionEngine:
                 "char_end": c.char_end,
                 "verified": c.verified,
                 "match_type": c.match_type,
+                "match_score": c.match_score,
             }
             for c in citations
         ]
@@ -961,7 +973,9 @@ Format as a brief, readable summary (2-3 paragraphs)."""
             LLMMessage(role="user", content=summary_prompt),
         ]
 
-        summary = await self.llm.complete(
+        # Summaries are a compression task, not a reasoning task — use the
+        # cheap tier.
+        summary = await self.fast_llm.complete(
             messages, temperature=0.5, max_tokens=settings.max_tokens_per_turn
         )
 

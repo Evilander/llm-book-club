@@ -1,5 +1,6 @@
 """Discussion session endpoints."""
 import json
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -11,6 +12,22 @@ from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
 from ..rate_limit import limiter
 from ..settings import settings
+
+
+def _preferences_require_adult(prefs: dict) -> bool:
+    """True when the session preferences enter after-dark territory and
+    therefore require a server-side 18+ confirmation to proceed."""
+    if prefs.get("discussion_style") == "sexy":
+        return True
+    if prefs.get("experience_mode") == "after_dark":
+        return True
+    if prefs.get("desire_lens"):
+        return True
+    if prefs.get("adult_intensity"):
+        return True
+    if prefs.get("erotic_focus"):
+        return True
+    return False
 
 router = APIRouter(tags=["sessions"])
 
@@ -29,6 +46,11 @@ class StartSessionRequest(BaseModel):
     desire_lens: str | None = None
     adult_intensity: str | None = None
     erotic_focus: str | None = None
+    # Required when any adult preference is set. Sending adult preferences
+    # with adult_confirmed=False fails the request with 400. Sending
+    # adult_confirmed=True without any adult preference is benign (stored
+    # on the row for audit but has no runtime effect).
+    adult_confirmed: bool = False
 
 
 class MessageRequest(BaseModel):
@@ -50,6 +72,9 @@ class SessionPreferencesUpdateRequest(BaseModel):
     desire_lens: str | None = None
     adult_intensity: str | None = None
     erotic_focus: str | None = None
+    # Allow a user to confirm 18+ on a session that didn't declare it at
+    # start. Required before adult preferences can be added in a PATCH.
+    adult_confirmed: bool | None = None
 
 
 class SessionResponse(BaseModel):
@@ -61,6 +86,7 @@ class SessionResponse(BaseModel):
     sections: list[dict]
     is_active: bool
     preferences: dict | None = None
+    adult_confirmed: bool = False
 
 
 class MessageResponse(BaseModel):
@@ -106,6 +132,27 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    preferences = {
+        "discussion_style": req.discussion_style,
+        "vibes": req.vibes or [],
+        "voice_profile": req.voice_profile,
+        "reader_goal": req.reader_goal,
+        "experience_mode": req.experience_mode or "text",
+        "desire_lens": req.desire_lens,
+        "adult_intensity": req.adult_intensity,
+        "erotic_focus": req.erotic_focus,
+    }
+
+    # Server-side 18+ gate: adult preferences cannot be set without explicit
+    # age confirmation on the request. This is the authoritative check — the
+    # frontend checkbox is advisory only.
+    if _preferences_require_adult(preferences) and not req.adult_confirmed:
+        raise HTTPException(
+            400,
+            "This session uses adult / after-dark preferences and requires "
+            "adult_confirmed=true in the request body.",
+        )
+
     # Create session
     session = DiscussionSession(
         book_id=req.book_id,
@@ -114,16 +161,9 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
         section_ids=slice_data.section_ids,
         current_phase="warmup",
         is_active=True,
-        preferences_json={
-            "discussion_style": req.discussion_style,
-            "vibes": req.vibes or [],
-            "voice_profile": req.voice_profile,
-            "reader_goal": req.reader_goal,
-            "experience_mode": req.experience_mode or "text",
-            "desire_lens": req.desire_lens,
-            "adult_intensity": req.adult_intensity,
-            "erotic_focus": req.erotic_focus,
-        },
+        preferences_json=preferences,
+        adult_confirmed=bool(req.adult_confirmed),
+        adult_confirmed_at=datetime.utcnow() if req.adult_confirmed else None,
     )
     db.add(session)
     db.commit()
@@ -138,6 +178,7 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
         sections=slice_data.sections,
         is_active=session.is_active,
         preferences=session.preferences_json,
+        adult_confirmed=bool(session.adult_confirmed),
     )
 
 
@@ -175,6 +216,7 @@ def get_session(session_id: str, db: Session = Depends(get_db)):
         ],
         is_active=session.is_active,
         preferences=session.preferences_json,
+        adult_confirmed=bool(session.adult_confirmed),
     )
 
 
@@ -190,12 +232,36 @@ def update_session_preferences(
 
     existing = dict(session.preferences_json or {})
     updates = req.model_dump(exclude_none=True)
-    existing.update(updates)
+    pref_updates = {k: v for k, v in updates.items() if k != "adult_confirmed"}
+    existing.update(pref_updates)
+
+    # Apply 18+ confirmation if sent. Once confirmed the session stays
+    # confirmed; unsetting would be a security regression if adult messages
+    # already exist.
+    if req.adult_confirmed is True and not session.adult_confirmed:
+        session.adult_confirmed = True
+        session.adult_confirmed_at = datetime.utcnow()
+
+    # Enforce gate on the merged preference set. If the merge would enter
+    # after-dark territory but the session is not confirmed (and this PATCH
+    # did not confirm), reject the preference update rather than silently
+    # storing it.
+    if _preferences_require_adult(existing) and not session.adult_confirmed:
+        raise HTTPException(
+            400,
+            "This preference update enters after-dark territory and requires "
+            "adult_confirmed=true.",
+        )
+
     session.preferences_json = existing
     db.commit()
     db.refresh(session)
 
-    return {"session_id": session.id, "preferences": session.preferences_json}
+    return {
+        "session_id": session.id,
+        "preferences": session.preferences_json,
+        "adult_confirmed": session.adult_confirmed,
+    }
 
 
 @router.get("/sessions/{session_id}/messages")
