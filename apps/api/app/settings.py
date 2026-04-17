@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     grok_model: str = Field("grok-3", alias="GROK_MODEL")
     local_llm_base_url: str | None = Field(None, alias="LOCAL_LLM_BASE_URL")
 
+    # Cheap model used for routing / classification / summary. When unset,
+    # falls back to the primary LLM (same provider, default model). The
+    # provider is reused; only the model name changes.
+    fast_llm_enabled: bool = Field(True, alias="FAST_LLM_ENABLED")
+    anthropic_fast_model: str = Field(
+        "claude-haiku-4-5", alias="ANTHROPIC_FAST_MODEL"
+    )
+    openai_fast_model: str = Field("gpt-4.1-mini", alias="OPENAI_FAST_MODEL")
+
     embeddings_provider: str = Field("openai", alias="EMBEDDINGS_PROVIDER")
     openai_embeddings_model: str = Field("text-embedding-3-large", alias="OPENAI_EMBEDDINGS_MODEL")
     local_embeddings_base_url: str | None = Field(None, alias="LOCAL_EMBEDDINGS_BASE_URL")
@@ -43,6 +52,10 @@ class Settings(BaseSettings):
 
     cors_origins: str = Field("http://localhost:3000", alias="CORS_ORIGINS")  # comma-separated
     rate_limit_default: str = Field("60/minute", alias="RATE_LIMIT_DEFAULT")
+
+    # Shared-secret token required to reach /v1/admin/*. When unset in a
+    # non-dev environment the admin router refuses all requests.
+    admin_token: str | None = Field(None, alias="ADMIN_TOKEN")
 
     # --- Token budget guardrails ---
     # Maximum number of conversation history messages sent to the LLM per turn.

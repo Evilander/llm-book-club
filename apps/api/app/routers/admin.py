@@ -1,13 +1,38 @@
 """Admin endpoints for cost tracking and usage analytics."""
+import hmac
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..db import get_db, Message, DiscussionSession
+from ..settings import settings
 
-router = APIRouter(tags=["admin"])
+
+def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+    """Guard admin endpoints behind a shared-secret token.
+
+    Behaviour matrix:
+      - ADMIN_TOKEN unset AND app_env == "dev"  -> allow (local dev convenience)
+      - ADMIN_TOKEN unset AND app_env != "dev"  -> deny (misconfig must not leak)
+      - ADMIN_TOKEN set                         -> require header match
+    """
+    configured = settings.admin_token
+    if not configured:
+        # Permissive in local / test environments only. Any other app_env
+        # (staging, prod, unknown) must set ADMIN_TOKEN explicitly.
+        if settings.app_env.lower() in {"dev", "development", "test", "local"}:
+            return
+        raise HTTPException(
+            503,
+            "Admin endpoints are disabled: ADMIN_TOKEN is not configured.",
+        )
+    if not x_admin_token or not hmac.compare_digest(x_admin_token, configured):
+        raise HTTPException(401, "Invalid or missing admin token")
+
+
+router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 
 # Rough per-token pricing (Claude Sonnet tier)
 INPUT_COST_PER_TOKEN = 3.0 / 1_000_000   # $3 per million input tokens
