@@ -109,6 +109,7 @@ Most settings live in `apps/api/.env`.
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY`: hosted LLM provider credentials.
 - `LLM_PROVIDER`: `openai`, `claude`, `gemini`, `grok`, or `local`.
 - `LOCAL_LLM_BASE_URL`: OpenAI-compatible local endpoint, such as Ollama.
+- `FAST_LLM_ENABLED`, `ANTHROPIC_FAST_MODEL`, `OPENAI_FAST_MODEL`: cheap-tier model used for routing, turn classification, and summary generation. Defaults to `claude-haiku-4-5` / `gpt-4.1-mini`.
 - `EMBEDDINGS_PROVIDER`: `openai`, `gemini`, or `local`.
 - `OPENAI_EMBEDDINGS_MODEL`, `LOCAL_EMBEDDINGS_BASE_URL`, `LOCAL_EMBEDDINGS_MODEL`: embedding configuration.
 - `RERANKER_PROVIDER`: `none`, `cohere`, or `local`.
@@ -120,6 +121,20 @@ Most settings live in `apps/api/.env`.
 - `AUDIOBOOKS_DIR`: optional local audiobook directory used for matching likely companion audio files.
 - `DATABASE_URL`, `REDIS_URL`: infrastructure connections.
 - `CORS_ORIGINS`, `MAX_UPLOAD_MB`: app-level behavior.
+- `ADMIN_TOKEN`: shared-secret token required on the `X-Admin-Token` header for `/v1/admin/*` endpoints. When unset, admin endpoints are permissive only when `APP_ENV` is `dev`, `development`, `test`, or `local`; any other environment refuses admin requests until this is set.
+
+## Security notes
+
+- **18+ gate is server-side.** After-dark / erotic sessions require `adult_confirmed: true` in the `/v1/sessions/start` request (or in a PATCH to `/v1/sessions/{id}/preferences` that enters after-dark territory). The frontend checkbox is advisory — the server is the authority. Sessions record `adult_confirmed` and `adult_confirmed_at` for audit. The After-dark agent will not run unless both the preference signal and the server-side confirmation are present.
+- **Admin endpoints.** `/v1/admin/*` are gated by `ADMIN_TOKEN` in any non-local environment. Set it before deploying anywhere reachable from the public internet.
+- **Postgres / Redis binding.** The default `docker-compose.yml` binds the database and redis ports to `127.0.0.1` only. If you deploy this compose file to a VPS, leave that binding in place (or remove the `ports` block entirely and use Docker-network DNS).
+- **Upload size.** Uploads are streamed and capped to `MAX_UPLOAD_MB` without being buffered first — oversized requests are rejected before consuming memory.
+
+## Model defaults
+
+- Anthropic: `claude-sonnet-4-6` for primary reasoning, `claude-haiku-4-5` for the fast tier.
+- OpenAI: `gpt-4.1` for primary, `gpt-4.1-mini` for the fast tier.
+- Anthropic requests use prompt caching on the stable agent prefix (`cache_control: ephemeral`); per-turn retrieval evidence is sent as a separate block so the prefix stays warm across turns.
 
 Provider note:
 
