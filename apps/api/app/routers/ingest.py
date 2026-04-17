@@ -66,11 +66,24 @@ async def ingest_book(
     if not filename.lower().endswith((".pdf", ".epub", ".txt")):
         raise HTTPException(400, "Only PDF, EPUB, and TXT files are supported")
 
-    # Read and validate size
+    # Stream-read with a running byte cap so a malicious upload cannot exhaust
+    # memory before we reject it.
     size_limit = settings.max_upload_mb * 1024 * 1024
-    data = await file.read()
-    if len(data) > size_limit:
-        raise HTTPException(400, f"File too large. Max size: {settings.max_upload_mb}MB")
+    chunks: list[bytes] = []
+    total = 0
+    chunk_size = 1024 * 1024  # 1 MB reads
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > size_limit:
+            raise HTTPException(
+                400,
+                f"File too large. Max size: {settings.max_upload_mb}MB",
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
 
     # Determine file type
     lower_name = filename.lower()
@@ -153,10 +166,22 @@ def list_books(
     has_audiobook: dict[str, bool] = {}
     if settings.audiobooks_dir:
         try:
-            from ..services.media_library import match_audiobooks_for_book
+            from ..services.media_library import (
+                SUPPORTED_AUDIOBOOK_EXTENSIONS,
+                match_audiobooks_for_book,
+                scan_media_dir,
+            )
+            audiobook_entries = scan_media_dir(
+                settings.audiobooks_dir,
+                extensions=SUPPORTED_AUDIOBOOK_EXTENSIONS,
+            )
             for b in books:
                 if b.ingest_status == IngestStatus.COMPLETED:
-                    matches = match_audiobooks_for_book(b.title, b.author)
+                    matches = match_audiobooks_for_book(
+                        book_title=b.title,
+                        book_author=b.author,
+                        audiobook_entries=audiobook_entries,
+                    )
                     has_audiobook[b.id] = len(matches) > 0
         except Exception:
             pass  # Graceful degradation if audiobook matching fails
