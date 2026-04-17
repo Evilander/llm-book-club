@@ -274,14 +274,23 @@ export function useDiscussionSession({
             }
           } else if (event.type === "message_end") {
             const role = String(event.role || "assistant");
-            const id = messageIds[role];
+            const provisionalId = messageIds[role];
             const content = String(event.content || "");
             const citations = Array.isArray(event.citations) ? event.citations : null;
-            if (id) {
+            // Adopt the server-canonical message_id once the agent's turn
+            // finishes, replacing the provisional stream-local id. This
+            // makes later merges (feedback, reload, repair) idempotent
+            // against the DB truth.
+            const serverId =
+              typeof event.message_id === "string" && event.message_id
+                ? event.message_id
+                : provisionalId;
+            if (provisionalId) {
+              messageIds[role] = serverId;
               setMessages((prev) =>
                 prev.map((message) =>
-                  message.id === id
-                    ? { ...message, content, citations }
+                  message.id === provisionalId
+                    ? { ...message, id: serverId, content, citations }
                     : message
                 )
               );
