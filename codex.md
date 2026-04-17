@@ -218,10 +218,28 @@ Current environment variables and defaults:
 - `AUDIOBOOKS_DIR`
 - `CORS_ORIGINS` - default `http://localhost:3000`
 - `RATE_LIMIT_DEFAULT` - default `60/minute`
+- `ADMIN_TOKEN` - shared secret for `/v1/admin/*`. When unset, admin is permissive only if `APP_ENV` is `dev`/`development`/`test`/`local`.
+- `FAST_LLM_ENABLED` - default `true`. When true, routing/classification/summary calls use the cheap tier instead of the primary model.
+- `ANTHROPIC_FAST_MODEL` - default `claude-haiku-4-5`
+- `OPENAI_FAST_MODEL` - default `gpt-4.1-mini`
 - `MAX_HISTORY_MESSAGES` - default `50`
 - `MAX_CONTEXT_TOKENS` - default `4000`
 - `MAX_TOKENS_PER_TURN` - default `2048`
 - `MAX_SESSION_MESSAGES` - default `200`
+
+Provider model pins (in `apps/api/app/providers/llm/`):
+
+- Anthropic primary: `claude-sonnet-4-6`; fast tier: `claude-haiku-4-5`.
+- OpenAI primary: `gpt-4.1`; fast tier: `gpt-4.1-mini`.
+- Anthropic requests use block-array `system` with `cache_control: ephemeral` on the stable agent prefix. Per-turn evidence is appended after an `EVIDENCE_CACHE_BOUNDARY` sentinel (defined in `providers.llm.base`) which the client splits so the stable prefix stays cacheable across turns.
+
+## Security & gate invariants
+
+- **Adult-room gate.** Any session carrying `discussion_style=sexy`, `experience_mode=after_dark`, `desire_lens`, `adult_intensity`, or `erotic_focus` must include `adult_confirmed=true` in `POST /v1/sessions/start`. The PATCH preferences route enforces the same rule on updates. The DiscussionSession row stores `adult_confirmed` + `adult_confirmed_at`. `DiscussionEngine.is_adult` requires both the preference signal AND the server-side confirmation before the after-dark agent runs. See migration `004_add_adult_confirmed.py`.
+- **Citation grading.** Only `match_type` in `{"exact", "normalized"}` is allowed to set `verified=True`. Word-set overlap (previously `"fuzzy"`) now surfaces as `match_type="near_match"`, `verified=False`, with a `match_score` alongside. Threshold is 0.95; anything below is rejected outright.
+- **Admin router** is wrapped in a `require_admin` dependency that calls `hmac.compare_digest` on `X-Admin-Token` against `ADMIN_TOKEN`.
+- **Upload path** streams uploads in 1MB chunks with a running byte cap so oversized requests are rejected before buffering.
+- **Docker.** The API image runs as a non-root `api` user. The default compose file binds Postgres (5432) and Redis (6379) to 127.0.0.1 only.
 
 ## Current Frontend Behavior
 
