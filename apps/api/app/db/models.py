@@ -224,6 +224,15 @@ class DiscussionSession(Base):
     # Summary and notes
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Server-side 18+ gate for after-dark / erotic sessions. This is the
+    # authoritative record — the frontend checkbox is a convenience only.
+    # Any session that carries adult preferences (desire_lens, adult_intensity,
+    # erotic_focus, style=="sexy", or experience_mode=="after_dark") MUST have
+    # adult_confirmed=True, set via an explicit request field, before the
+    # adult-room agent will run.
+    adult_confirmed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    adult_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

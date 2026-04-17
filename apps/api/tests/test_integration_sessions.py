@@ -234,6 +234,8 @@ class TestStartSession:
                 "adult_intensity": "frank",
                 "erotic_focus": "glamour",
                 "vibes": ["fun", "nightly"],
+                # Adult preferences require the 18+ gate.
+                "adult_confirmed": True,
             },
         )
         assert resp.status_code == 200
@@ -243,6 +245,23 @@ class TestStartSession:
         assert data["preferences"]["desire_lens"] == "trans_woman"
         assert data["preferences"]["adult_intensity"] == "frank"
         assert data["preferences"]["erotic_focus"] == "glamour"
+        assert data["adult_confirmed"] is True
+
+    def test_start_session_rejects_adult_prefs_without_confirmation(
+        self, client, book_with_chunks
+    ):
+        """Adult preferences without adult_confirmed=True must be rejected."""
+        book = book_with_chunks["book"]
+        resp = client.post(
+            "/v1/sessions/start",
+            json={
+                "book_id": book.id,
+                "mode": "conversation",
+                "discussion_style": "sexy",
+                "desire_lens": "woman",
+            },
+        )
+        assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +287,11 @@ class TestGetSession:
         assert resp.status_code == 404
 
     def test_patch_session_preferences(self, client, active_session):
-        """Preference updates can be changed after session start."""
+        """Preference updates can be changed after session start.
+
+        Adult preferences require the 18+ confirmation to be set either
+        beforehand or as part of the PATCH itself.
+        """
         session = active_session["session"]
         resp = client.patch(
             f"/v1/sessions/{session.id}/preferences",
@@ -278,6 +301,7 @@ class TestGetSession:
                 "desire_lens": "gay_man",
                 "adult_intensity": "suggestive",
                 "erotic_focus": "power",
+                "adult_confirmed": True,
             },
         )
         assert resp.status_code == 200
@@ -287,6 +311,18 @@ class TestGetSession:
         assert data["preferences"]["desire_lens"] == "gay_man"
         assert data["preferences"]["adult_intensity"] == "suggestive"
         assert data["preferences"]["erotic_focus"] == "power"
+        assert data["adult_confirmed"] is True
+
+    def test_patch_session_rejects_adult_without_confirmation(
+        self, client, active_session
+    ):
+        """A PATCH that enters after-dark territory without confirmation is rejected."""
+        session = active_session["session"]
+        resp = client.patch(
+            f"/v1/sessions/{session.id}/preferences",
+            json={"desire_lens": "woman"},
+        )
+        assert resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------

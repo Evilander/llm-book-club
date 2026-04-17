@@ -363,8 +363,16 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
           desire_lens: selectedStyle === "sexy" ? desireLens : null,
           adult_intensity: selectedStyle === "sexy" ? adultIntensity : null,
           erotic_focus: selectedStyle === "sexy" ? eroticFocus : null,
+          adult_confirmed: selectedStyle === "sexy" ? adultConfirmed : false,
         }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const detail =
+          typeof err?.detail === "string" ? err.detail : "Failed to open room";
+        toast.error(detail);
+        return;
+      }
       const data = await res.json();
       if (data.session_id) {
         toast.success(selectedStyle === "sexy" ? "After-dark room opening..." : "Opening your reading room...");
