@@ -4,7 +4,6 @@ import os
 import uuid
 import logging
 from pathlib import Path
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -14,7 +13,7 @@ from ..providers.embeddings.factory import get_embeddings_client
 from ..providers.llm.factory import get_llm_client
 from .extractor import extract_text
 from .chunker import chunk_sections, chunk_text, estimate_tokens, estimate_reading_time
-from .intelligent_chunker import IntelligentChunker, StructureAnalyzer
+from .intelligent_chunker import IntelligentChunker
 
 logger = logging.getLogger(__name__)
 

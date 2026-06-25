@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..db import get_db, Book, DiscussionSession, Message, DiscussionMode, MessageRole
+from ..db import get_db, Book, DiscussionSession, Message, DiscussionMode
 from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
 from ..rate_limit import limiter

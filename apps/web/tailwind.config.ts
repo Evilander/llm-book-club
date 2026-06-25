@@ -63,7 +63,7 @@ const config: Config = {
         "2xl": "calc(var(--radius) + 8px)",
       },
       fontFamily: {
-        sans: ["var(--font-sans)", "Inter", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)", "IBM Plex Sans", "system-ui", "sans-serif"],
         serif: ["Literata", "Georgia", "serif"],
         label: ["var(--font-label)", "Space Grotesk", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "JetBrains Mono", "monospace"],

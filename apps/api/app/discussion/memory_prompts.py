@@ -6,7 +6,6 @@ Agents remember previous chapters, track themes, and make cross-textual connecti
 """
 
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass

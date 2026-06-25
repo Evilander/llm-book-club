@@ -14,11 +14,8 @@ Handles complex structures like:
 
 import re
 import random
-from dataclasses import dataclass, field
-from typing import AsyncIterator
 from pydantic import BaseModel
 
-from app.db.models import ReadingUnitType
 
 
 # =============================================================================

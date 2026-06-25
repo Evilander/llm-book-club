@@ -280,9 +280,7 @@ class Message(Base):
     )
 
 
-# =============================================================================
 # READING UNITS - Intelligent chunking for massive texts
-# =============================================================================
 
 class ReadingUnit(Base):
     """
@@ -334,9 +332,7 @@ class ReadingUnit(Base):
     )
 
 
-# =============================================================================
 # BOOK MEMORY - Persistent memory that grows as user reads
-# =============================================================================
 
 class BookMemory(Base):
     """
@@ -627,9 +623,7 @@ class QuizResult(Base):
     )
 
 
-# =============================================================================
 # USER PROGRESS - Global gamification state
-# =============================================================================
 
 class UserProgress(Base):
     """
