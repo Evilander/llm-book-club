@@ -96,9 +96,9 @@ function getBookGradient(seed: string): string {
     "from-red-400/65 via-orange-500/60 to-amber-500/55",
     "from-teal-400/65 via-cyan-500/55 to-sky-500/50",
     "from-emerald-400/60 via-teal-500/55 to-cyan-500/50",
-    "from-indigo-400/65 via-violet-500/55 to-purple-500/55",
-    "from-purple-400/65 via-fuchsia-500/55 to-rose-500/55",
-    "from-sky-400/65 via-blue-500/55 to-indigo-500/55",
+    "from-stone-400/65 via-amber-600/55 to-orange-600/55",
+    "from-rose-400/65 via-orange-500/55 to-amber-500/55",
+    "from-yellow-500/65 via-amber-600/55 to-stone-500/55",
   ];
   const hash = seed.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   return gradients[hash % gradients.length];

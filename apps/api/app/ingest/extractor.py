@@ -6,7 +6,6 @@ import tempfile
 import os
 from dataclasses import dataclass, field
 from typing import Literal
-from pathlib import Path
 
 from pypdf import PdfReader
 from ebooklib import epub

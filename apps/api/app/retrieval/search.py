@@ -1,7 +1,6 @@
 """Hybrid search over book chunks: pgvector + PostgreSQL FTS + Reciprocal Rank Fusion + optional reranking."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -10,7 +9,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from ..db import Chunk, Section
+from ..db import Chunk
 from ..providers.embeddings.factory import get_embeddings_client
 from .cache import get_embedding_cache
 
