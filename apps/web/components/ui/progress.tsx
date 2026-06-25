@@ -34,7 +34,7 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
       default: "bg-primary",
       success: "bg-green-500",
       warning: "bg-yellow-500",
-      xp: "bg-gradient-to-r from-purple-500 to-pink-500",
+      xp: "bg-gradient-to-r from-amber-500 to-orange-600",
     };
 
     return (

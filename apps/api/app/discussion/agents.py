@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
@@ -17,9 +17,8 @@ from ..providers.llm.base import (
 from ..retrieval.search import search_chunks, SearchResult
 from ..retrieval.filters import build_evidence_block, flag_suspicious_chunks
 from ..settings import settings
-from .prompts import get_agent_prompt
 from .memory_prompts import MemoryContext, get_memory_aware_prompt
-from .token_budget import trim_evidence, estimate_tokens
+from .token_budget import trim_evidence
 from .metrics import CitationMetrics, build_citation_metrics
 
 logger = logging.getLogger(__name__)
@@ -48,9 +47,7 @@ class AgentResponse:
     output_tokens: int = 0
 
 
-# ---------------------------------------------------------------------------
 # Text normalization
-# ---------------------------------------------------------------------------
 
 def normalize_text(text: str) -> str:
     """Normalize text for comparison (NFKC, lowercase, collapse whitespace)."""
@@ -60,9 +57,7 @@ def normalize_text(text: str) -> str:
     return text
 
 
-# ---------------------------------------------------------------------------
 # Span alignment
-# ---------------------------------------------------------------------------
 
 def compute_span_alignment(chunk_text: str, quote: str) -> tuple[int, int, str] | None:
     """
@@ -173,9 +168,7 @@ def _map_norm_offsets_to_original(
     return (orig_start, orig_end)
 
 
-# ---------------------------------------------------------------------------
 # Structured JSON response parsing (primary path)
-# ---------------------------------------------------------------------------
 
 def parse_structured_response(text: str) -> tuple[str, list[dict]] | None:
     """
@@ -241,9 +234,7 @@ def parse_structured_response(text: str) -> tuple[str, list[dict]] | None:
     return (analysis, citations)
 
 
-# ---------------------------------------------------------------------------
 # Legacy regex citation parsing (fallback)
-# ---------------------------------------------------------------------------
 
 def parse_citations(text: str) -> tuple[str, list[dict]]:
     """
@@ -288,9 +279,7 @@ def parse_response_auto(text: str) -> tuple[str, list[dict]]:
     return parse_citations(text)
 
 
-# ---------------------------------------------------------------------------
 # Citation verification (with span alignment)
-# ---------------------------------------------------------------------------
 
 def verify_citations(
     db: Session,
@@ -465,9 +454,7 @@ def parse_and_verify_citations(
     return clean_text, all_citations, invalid
 
 
-# ---------------------------------------------------------------------------
 # Citation repair
-# ---------------------------------------------------------------------------
 
 CITATION_REPAIR_PROMPT = """You previously generated a response with citations, but some citations contained quotes that do not appear in the source chunks.
 
@@ -546,9 +533,7 @@ async def attempt_citation_repair(
         return None
 
 
-# ---------------------------------------------------------------------------
 # Base agent
-# ---------------------------------------------------------------------------
 
 class BaseAgent:
     """Base class for discussion agents."""

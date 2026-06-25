@@ -5,10 +5,10 @@ from typing import AsyncIterator
 
 from sqlalchemy.orm import Session
 
-from ..db import DiscussionSession, Message, MessageRole, DiscussionMode, BookMemory, ReadingUnit
+from ..db import DiscussionSession, Message, MessageRole, BookMemory, ReadingUnit
 from ..providers.llm.factory import get_fast_llm_client, get_llm_client
 from ..providers.llm.base import LLMMessage
-from ..retrieval.selector import select_session_slice, SessionSlice
+from ..retrieval.selector import SessionSlice
 from .agents import (
     FacilitatorAgent,
     CloseReaderAgent,
@@ -16,7 +16,6 @@ from .agents import (
     AfterDarkGuideAgent,
     AgentResponse,
     Citation,
-    parse_citations,
     parse_response_auto,
     verify_citations,
     attempt_citation_repair,
@@ -25,7 +24,7 @@ from ..settings import settings
 from .prompts import DISCUSSION_PROMPTS
 from .memory_prompts import MemoryContext, build_memory_from_db
 from .metrics import CitationMetrics, build_citation_metrics, TurnMetrics
-from .token_budget import truncate_history, estimate_tokens
+from .token_budget import truncate_history
 from .sentence_splitter import SentenceSplitter
 
 import logging as _logging
@@ -756,9 +755,6 @@ class DiscussionEngine:
                 total = len(verified) + len(invalid)
                 invalid_ratio = len(invalid) / total if total > 0 else 0.0
 
-                # Track pre-repair state for metrics
-                pre_repair_verified_count = len(verified)
-                pre_repair_invalid_count = len(invalid)
                 repair_attempted = False
                 repair_succeeded = False
                 post_repair_verified_count = 0
@@ -907,7 +903,7 @@ class DiscussionEngine:
                     yield event
 
         turn_metrics.finish()
-        violations = turn_metrics.check_budgets()
+        turn_metrics.check_budgets()
         _logger.info(
             "[TurnMetrics] turn_id=%s total_ms=%.1f ttft_ms=%.1f stages=%s",
             turn_metrics.turn_id,
