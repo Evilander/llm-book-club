@@ -69,6 +69,7 @@ export interface ActiveSection extends ExploreSection {
 }
 
 export interface AudiobookMatch {
+  id: string;
   path: string;
   filename: string;
   extension: string;
@@ -77,6 +78,8 @@ export interface AudiobookMatch {
   parent_folder: string | null;
   match_score: number | null;
   match_reason: string | null;
+  track_count: number;
+  source_kind: "folder" | "file";
 }
 
 export interface ExplorePayload {

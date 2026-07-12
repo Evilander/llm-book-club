@@ -5,7 +5,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .routers import health, ingest, sessions, tts, memory, library, admin
+from .routers import (
+    admin,
+    audiobooks,
+    catalog,
+    health,
+    ingest,
+    library,
+    memory,
+    reader_state,
+    sessions,
+    tts,
+)
 from .db.init_db import init_db
 from .settings import settings
 from .rate_limit import limiter
@@ -36,6 +47,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "Accept-Ranges",
+        "Content-Length",
+        "Content-Range",
+        "Content-Disposition",
+        "ETag",
+        "Last-Modified",
+    ],
 )
 
 app.include_router(health.router)
@@ -43,5 +62,8 @@ app.include_router(ingest.router, prefix="/v1")
 app.include_router(sessions.router, prefix="/v1")
 app.include_router(tts.router, prefix="/v1")
 app.include_router(library.router, prefix="/v1")
+app.include_router(reader_state.router, prefix="/v1")
+app.include_router(audiobooks.router, prefix="/v1")
+app.include_router(catalog.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(memory.router)

@@ -7,8 +7,14 @@ cover the pure-Python merge/ranking logic that sits on top of the raw search.
 """
 import pytest
 import hashlib
+from pathlib import Path
 
-from app.retrieval.search import SearchResult, reciprocal_rank_fusion
+from app.retrieval.search import (
+    VECTOR_DISTANCE_SQL,
+    SearchResult,
+    reciprocal_rank_fusion,
+    vector_search,
+)
 
 
 # =========================================================================
@@ -139,6 +145,47 @@ class TestReciprocalRankFusion:
         assert len(merged) == 100
         # First item should have highest score
         assert merged[0].score >= merged[-1].score
+
+
+@pytest.mark.asyncio
+async def test_vector_search_matches_halfvec_expression_index(monkeypatch):
+    class Cache:
+        def get(self, _query):
+            return [0.25] * 3072
+
+    class Result:
+        @staticmethod
+        def fetchall():
+            return []
+
+    class RecordingSession:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, statement, params=None):
+            self.calls.append((str(statement), params))
+            return Result()
+
+    monkeypatch.setattr("app.retrieval.search.get_embedding_cache", lambda: Cache())
+    db = RecordingSession()
+
+    results = await vector_search(db, "book-1", "ritual repetition")
+
+    assert results == []
+    assert "hnsw.iterative_scan" in db.calls[0][0]
+    assert VECTOR_DISTANCE_SQL.count("halfvec(3072)") == 2
+    assert VECTOR_DISTANCE_SQL in db.calls[1][0]
+
+
+def test_fresh_and_forward_hnsw_migrations_use_halfvec():
+    migrations = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    historical = (migrations / "001_add_hnsw_index_and_fts.py").read_text()
+    forward = (migrations / "008_fix_3072_hnsw_index.py").read_text()
+
+    for migration in (historical, forward):
+        assert "embedding::halfvec(3072)" in migration
+        assert "halfvec_cosine_ops" in migration
+        assert "embedding vector_cosine_ops" not in migration
 
 
 # =========================================================================

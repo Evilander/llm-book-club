@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     grok_api_key: str | None = Field(None, alias="GROK_API_KEY")
     grok_model: str = Field("grok-3", alias="GROK_MODEL")
     local_llm_base_url: str | None = Field(None, alias="LOCAL_LLM_BASE_URL")
+    grounded_segments_enabled: bool = Field(
+        True, alias="GROUNDED_SEGMENTS_ENABLED"
+    )
 
     # Cheap model used for routing / classification / summary. When unset,
     # falls back to the primary LLM (same provider, default model). The
@@ -49,6 +52,12 @@ class Settings(BaseSettings):
     # Local books directory for filesystem browsing
     books_dir: str | None = Field(None, alias="BOOKS_DIR")
     audiobooks_dir: str | None = Field(None, alias="AUDIOBOOKS_DIR")
+    storage_dir: str = Field("./storage", alias="STORAGE_DIR")
+    library_catalog_ttl: int = Field(86400, alias="LIBRARY_CATALOG_TTL")
+    media_catalog_index_enabled: bool = Field(
+        True, alias="MEDIA_CATALOG_INDEX_ENABLED"
+    )
+    reader_profile_id: str = Field("local", alias="READER_PROFILE_ID")
 
     cors_origins: str = Field("http://localhost:3000", alias="CORS_ORIGINS")  # comma-separated
     rate_limit_default: str = Field("60/minute", alias="RATE_LIMIT_DEFAULT")

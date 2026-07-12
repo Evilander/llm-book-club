@@ -4,7 +4,6 @@ import os
 import uuid
 import logging
 from pathlib import Path
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -14,7 +13,7 @@ from ..providers.embeddings.factory import get_embeddings_client
 from ..providers.llm.factory import get_llm_client
 from .extractor import extract_text
 from .chunker import chunk_sections, chunk_text, estimate_tokens, estimate_reading_time
-from .intelligent_chunker import IntelligentChunker, StructureAnalyzer
+from .intelligent_chunker import IntelligentChunker
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +62,33 @@ async def run_ingestion_pipeline(
             raise ValueError(f"Book {book_id} not found")
 
         book.ingest_status = IngestStatus.PROCESSING
+        book.ingest_error = None
+        db.commit()
+
+        # A failed embedding call can leave committed chunks behind. Retrying
+        # must rebuild the canonical extraction rather than append duplicates.
+        db.query(Chunk).filter(Chunk.book_id == book_id).delete(
+            synchronize_session=False
+        )
+        db.query(Section).filter(Section.book_id == book_id).delete(
+            synchronize_session=False
+        )
         db.commit()
 
         # Step 1: Extract text and sections
         extracted = extract_text(file_data, filename)
+        if not extracted.full_text.strip():
+            raise ValueError(f"No readable text found in {filename}")
 
         # Update book metadata
         book.title = extracted.title
         book.author = extracted.author
         book.total_chars = len(extracted.full_text)
         book.total_tokens_estimate = estimate_tokens(extracted.full_text)
-        book.metadata_json = extracted.metadata
+        book.metadata_json = {
+            **(book.metadata_json or {}),
+            **extracted.metadata,
+        }
         db.commit()
 
         # Step 2: Chunk sections
@@ -163,6 +178,14 @@ def run_ingestion_sync(book_id: str, file_data: bytes, filename: str) -> str:
     return asyncio.run(run_ingestion_pipeline(book_id, file_data, filename))
 
 
+def run_local_ingestion_sync(book_id: str, file_path: str, filename: str) -> str:
+    """Read a mounted local publication inside the worker process."""
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Local publication no longer exists: {file_path}")
+    return run_ingestion_sync(book_id, path.read_bytes(), filename)
+
+
 async def run_intelligent_ingestion_pipeline(
     book_id: str,
     file_data: bytes,
@@ -198,6 +221,7 @@ async def run_intelligent_ingestion_pipeline(
             raise ValueError(f"Book {book_id} not found")
 
         book.ingest_status = IngestStatus.PROCESSING
+        book.ingest_error = None
         db.commit()
 
         logger.info(f"Starting intelligent ingestion for book {book_id}: {filename}")
@@ -210,7 +234,10 @@ async def run_intelligent_ingestion_pipeline(
         book.author = extracted.author
         book.total_chars = len(extracted.full_text)
         book.total_tokens_estimate = estimate_tokens(extracted.full_text)
-        book.metadata_json = extracted.metadata
+        book.metadata_json = {
+            **(book.metadata_json or {}),
+            **extracted.metadata,
+        }
         db.commit()
 
         logger.info(f"Extracted {book.total_tokens_estimate} tokens from {filename}")

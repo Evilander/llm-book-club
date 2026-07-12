@@ -13,6 +13,7 @@ from sqlalchemy import (
     Enum,
     Index,
     JSON,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -193,9 +194,8 @@ class Chunk(Base):
     __table_args__ = (
         Index("ix_chunks_book_section", "book_id", "section_id"),
         Index("ix_chunks_section_order", "section_id", "order_index"),
-        # HNSW index on embedding is created via Alembic migration (001) using raw SQL:
-        #   CREATE INDEX ix_chunks_embedding_hnsw ON chunks
-        #   USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)
+        # HNSW indexes a halfvec(3072) expression because pgvector's regular
+        # vector HNSW operator class is limited to 2,000 dimensions.
         # A generated tsvector column (text_search) and GIN index are also managed there.
     )
 
@@ -277,6 +277,234 @@ class Message(Base):
 
     __table_args__ = (
         Index("ix_messages_session_created", "session_id", "created_at"),
+    )
+
+
+class ReaderProfile(Base):
+    __tablename__ = "reader_profiles"
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    preferences_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    publication_states: Mapped[list["PublicationReadingState"]] = relationship(
+        "PublicationReadingState",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+    )
+    audiobook_states: Mapped[list["AudiobookListeningState"]] = relationship(
+        "AudiobookListeningState",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+    )
+
+
+class PublicationReadingState(Base):
+    __tablename__ = "publication_reading_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    profile_id: Mapped[str] = mapped_column(
+        String(100),
+        ForeignKey("reader_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    publication_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    reader_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    can_discuss: Mapped[bool] = mapped_column(default=False, nullable=False)
+    book_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    ingest_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    fraction: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    chapter: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    page: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    profile: Mapped["ReaderProfile"] = relationship(
+        "ReaderProfile", back_populates="publication_states"
+    )
+    annotations: Mapped[list["ReaderAnnotation"]] = relationship(
+        "ReaderAnnotation",
+        back_populates="reading_state",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "publication_id",
+            name="uq_publication_reading_state_profile_publication",
+        ),
+        Index("ix_publication_reading_states_recent", "profile_id", "updated_at"),
+    )
+
+
+class ReaderAnnotation(Base):
+    __tablename__ = "reader_annotations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    reading_state_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("publication_reading_states.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    fraction: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    chapter: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    page: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    reading_state: Mapped["PublicationReadingState"] = relationship(
+        "PublicationReadingState", back_populates="annotations"
+    )
+
+    __table_args__ = (
+        Index("ix_reader_annotations_state_deleted", "reading_state_id", "deleted_at"),
+    )
+
+
+class AudiobookListeningState(Base):
+    __tablename__ = "audiobook_listening_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    profile_id: Mapped[str] = mapped_column(
+        String(100),
+        ForeignKey("reader_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    audiobook_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    track_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    current_track_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    track_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    position_seconds: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    playback_rate: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    completed: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    profile: Mapped["ReaderProfile"] = relationship(
+        "ReaderProfile", back_populates="audiobook_states"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "audiobook_id",
+            name="uq_audiobook_listening_state_profile_audiobook",
+        ),
+        Index("ix_audiobook_listening_states_recent", "profile_id", "updated_at"),
+    )
+
+
+class LocalMediaCatalog(Base):
+    """Last successfully indexed snapshot for one configured media root."""
+
+    __tablename__ = "local_media_catalogs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    root_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    root_path: Mapped[str] = mapped_column(Text, nullable=False)
+    extension_signature: Mapped[str] = mapped_column(Text, nullable=False)
+    content_signature: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="idle", nullable=False)
+    active_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    scan_duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    scan_job_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    scan_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scan_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scan_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    items: Mapped[list["LocalMediaCatalogItem"]] = relationship(
+        "LocalMediaCatalogItem",
+        back_populates="catalog",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("kind", "root_key", name="uq_local_media_catalog_kind_root"),
+        Index("ix_local_media_catalog_status", "status", "updated_at"),
+    )
+
+
+class LocalMediaCatalogItem(Base):
+    """A lightweight filesystem record within a completed catalog generation."""
+
+    __tablename__ = "local_media_catalog_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    catalog_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("local_media_catalogs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    media_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    filename: Mapped[str] = mapped_column(String(1000), nullable=False)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    format_family: Mapped[str] = mapped_column(String(20), nullable=False)
+    reader_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    can_discuss: Mapped[bool] = mapped_column(default=False, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    modified_at: Mapped[str] = mapped_column(String(50), nullable=False)
+    title_guess: Mapped[str] = mapped_column(String(1000), nullable=False)
+    parent_folder: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    seen_generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_available: Mapped[bool] = mapped_column(default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    catalog: Mapped["LocalMediaCatalog"] = relationship(
+        "LocalMediaCatalog", back_populates="items"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "catalog_id", "media_id", name="uq_local_media_catalog_item_media"
+        ),
+        UniqueConstraint(
+            "catalog_id", "relative_path", name="uq_local_media_catalog_item_path"
+        ),
+        Index(
+            "ix_local_media_catalog_items_available_title",
+            "catalog_id",
+            "is_available",
+            "title_guess",
+        ),
+        Index(
+            "ix_local_media_catalog_items_generation",
+            "catalog_id",
+            "seen_generation",
+        ),
     )
 
 
