@@ -1,6 +1,7 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass
-from typing import Protocol, AsyncIterator
+from typing import Any, AsyncIterator, Protocol
 
 
 # Sentinel marker inserted between the stable agent system prefix and any
@@ -36,6 +37,44 @@ class LLMResponse:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+
+class StructuredOutputError(ValueError):
+    """Raised when a provider does not return a usable JSON object."""
+
+
+@dataclass
+class StructuredLLMResponse:
+    """Schema-constrained provider response with usage and refusal state."""
+
+    content: str
+    parsed: dict[str, Any] | None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model: str = ""
+    refusal: str | None = None
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+def parse_json_object(content: str) -> dict[str, Any]:
+    """Parse a JSON object, accepting an optional Markdown code fence."""
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1 :]
+        if stripped.rstrip().endswith("```"):
+            stripped = stripped.rstrip()[:-3].rstrip()
+    try:
+        parsed = json.loads(stripped)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise StructuredOutputError("Provider returned invalid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise StructuredOutputError("Provider structured output must be a JSON object")
+    return parsed
 
 
 class LLMClient(Protocol):
@@ -77,6 +116,18 @@ class LLMClient(Protocol):
         Returns:
             LLMResponse with content text and input/output token counts
         """
+        ...
+
+    async def complete_structured(
+        self,
+        messages: list[LLMMessage],
+        *,
+        schema_name: str,
+        json_schema: dict[str, Any],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> StructuredLLMResponse:
+        """Generate one JSON object constrained by ``json_schema``."""
         ...
 
     async def stream(

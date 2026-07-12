@@ -1,12 +1,19 @@
 """Google Gemini LLM provider."""
 from __future__ import annotations
+import copy
 import json
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 
 from ...settings import settings
-from .base import LLMMessage, LLMResponse
+from .base import (
+    LLMMessage,
+    LLMResponse,
+    StructuredLLMResponse,
+    StructuredOutputError,
+    parse_json_object,
+)
 
 
 class GeminiClient:
@@ -68,6 +75,26 @@ class GeminiClient:
             usage.get("promptTokenCount", 0),
             usage.get("candidatesTokenCount", 0),
         )
+
+    def _structured_schema(self, json_schema: dict[str, Any]) -> dict[str, Any]:
+        """Add the explicit object ordering required by Gemini 2.0."""
+        schema = copy.deepcopy(json_schema)
+        if not self.model.startswith("gemini-2.0"):
+            return schema
+
+        def add_ordering(node: Any) -> None:
+            if isinstance(node, dict):
+                properties = node.get("properties")
+                if isinstance(properties, dict):
+                    node.setdefault("propertyOrdering", list(properties))
+                for value in node.values():
+                    add_ordering(value)
+            elif isinstance(node, list):
+                for value in node:
+                    add_ordering(value)
+
+        add_ordering(schema)
+        return schema
 
     async def complete(
         self,
@@ -143,6 +170,81 @@ class GeminiClient:
                 output_tokens=output_tokens,
                 model=data.get("modelVersion", self.model),
             )
+
+    async def complete_structured(
+        self,
+        messages: list[LLMMessage],
+        *,
+        schema_name: str,
+        json_schema: dict[str, Any],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> StructuredLLMResponse:
+        """Generate JSON with Gemini's GenerateContent schema controls."""
+        system_instruction, contents = self._format_messages(messages)
+        payload: dict = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": self._structured_schema(json_schema),
+            },
+        }
+        if system_instruction:
+            payload["system_instruction"] = {
+                "parts": [{"text": system_instruction}],
+            }
+
+        url = f"{self.base_url}/models/{self.model}:generateContent"
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                url,
+                params={"key": self.api_key},
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        input_tokens, output_tokens = self._extract_usage(data)
+        candidates = data.get("candidates", [])
+        if not candidates:
+            block_reason = data.get("promptFeedback", {}).get("blockReason")
+            refusal = f"Gemini blocked the request: {block_reason or 'unknown reason'}"
+            return StructuredLLMResponse(
+                content="",
+                parsed=None,
+                refusal=refusal,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model=data.get("modelVersion", self.model),
+            )
+
+        candidate = candidates[0]
+        content = "".join(
+            str(part.get("text", ""))
+            for part in candidate.get("content", {}).get("parts", [])
+            if part.get("text") is not None
+        )
+        finish_reason = candidate.get("finishReason")
+        refusal = (
+            f"Gemini stopped the request: {finish_reason}"
+            if finish_reason in {"SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT"}
+            else None
+        )
+        if not content and not refusal:
+            raise StructuredOutputError(
+                f"Gemini returned no structured text for schema {schema_name}"
+            )
+        return StructuredLLMResponse(
+            content=content,
+            parsed=None if refusal else parse_json_object(content),
+            refusal=refusal,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            model=data.get("modelVersion", self.model),
+        )
 
     async def stream(
         self,

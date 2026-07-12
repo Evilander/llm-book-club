@@ -1,12 +1,18 @@
 """OpenAI LLM provider."""
 from __future__ import annotations
 import json
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 
 from ...settings import settings
-from .base import LLMMessage, LLMResponse
+from .base import (
+    LLMMessage,
+    LLMResponse,
+    StructuredLLMResponse,
+    StructuredOutputError,
+    parse_json_object,
+)
 
 
 class OpenAIClient:
@@ -94,6 +100,79 @@ class OpenAIClient:
                 output_tokens=usage.get("completion_tokens", 0),
                 model=data.get("model", self.model),
             )
+
+    async def complete_structured(
+        self,
+        messages: list[LLMMessage],
+        *,
+        schema_name: str,
+        json_schema: dict[str, Any],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> StructuredLLMResponse:
+        """Generate schema-constrained JSON through Chat Completions."""
+        if self.is_local:
+            schema_text = json.dumps(json_schema, separators=(",", ":"))
+            fallback_messages = [
+                *messages,
+                LLMMessage(
+                    role="user",
+                    content=(
+                        "Return only one JSON object matching this JSON Schema. "
+                        f"Do not use Markdown fences. Schema: {schema_text}"
+                    ),
+                ),
+            ]
+            response = await self.complete_with_usage(
+                fallback_messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return StructuredLLMResponse(
+                content=response.content,
+                parsed=parse_json_object(response.content),
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                model=response.model,
+            )
+
+        payload = {
+            "model": self.model,
+            "messages": self._format_messages(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": True,
+                    "schema": json_schema,
+                },
+            },
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._get_headers(),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        message = data["choices"][0]["message"]
+        refusal = message.get("refusal")
+        content = message.get("content") or ""
+        if not isinstance(content, str):
+            raise StructuredOutputError("Provider structured content must be text")
+        usage = data.get("usage", {})
+        return StructuredLLMResponse(
+            content=content,
+            parsed=None if refusal else parse_json_object(content),
+            refusal=str(refusal) if refusal else None,
+            input_tokens=usage.get("prompt_tokens", 0),
+            output_tokens=usage.get("completion_tokens", 0),
+            model=data.get("model", self.model),
+        )
 
     async def stream(
         self,
