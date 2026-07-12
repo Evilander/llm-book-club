@@ -1,0 +1,646 @@
+/* LLM Book Club — Literary Instrument */
+
+@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,400;1,7..72,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --paper: #efe8da;
+  --paper-warm: #f4ecdc;
+  --paper-shadow: #d9d1c0;
+  --ink: #19140d;
+  --ink-soft: #2a231a;
+  --ink-mute: #6b5f4c;
+  --ink-faint: #9a8d75;
+  --gutter: #e3dbc8;
+
+  --amber: #c8861f;   /* Sam */
+  --teal: #1f8a7a;    /* Ellis */
+  --rose: #c54668;    /* Kit */
+  --fuchsia: #a33c73; /* After-dark */
+  --blue: #3a6fa8;    /* User */
+
+  --exact: #3f8f5a;
+  --normalized: #c8861f;
+  --fuzzy: #d9a548;
+  --unverified: #b64848;
+
+  --room: #151114;
+  --room-soft: #1e1a18;
+
+  --spring-paper: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* After-dark override */
+.world.after-dark {
+  --paper: #2a1620;
+  --paper-warm: #2f1823;
+  --paper-shadow: #1c0d15;
+  --ink: #f4e7e7;
+  --ink-soft: #e8d4d8;
+  --ink-mute: #a0848d;
+  --ink-faint: #6e5860;
+  --gutter: #1f101a;
+  --amber: #d8a23c;
+  --teal: #6fb8a8;
+  --rose: #e26a8a;
+  --fuchsia: #e879f9;
+  --room: #0e070b;
+  --room-soft: #180a12;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: #0a0807;
+  color: var(--ink);
+  font-family: 'Literata', Georgia, serif;
+  font-feature-settings: "onum", "kern";
+  overflow: hidden;
+}
+
+#root { height: 100%; }
+
+.world {
+  position: fixed;
+  inset: 0;
+  background: var(--room);
+  color: var(--ink);
+  overflow: hidden;
+  transition: background 900ms var(--spring-paper);
+}
+
+/* ─── Ambient room chrome ─── */
+.room-backdrop {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(200,134,31,0.06), transparent 60%),
+    radial-gradient(ellipse 50% 50% at 80% 80%, rgba(31,138,122,0.04), transparent 60%),
+    var(--room);
+  pointer-events: none;
+}
+.world.after-dark .room-backdrop {
+  background:
+    radial-gradient(ellipse 60% 40% at 30% 30%, rgba(232,121,249,0.08), transparent 60%),
+    radial-gradient(ellipse 50% 50% at 70% 80%, rgba(197,70,104,0.06), transparent 60%),
+    var(--room);
+}
+
+/* ─── State morphing container ─── */
+.stage {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ─── The Book — persistent spatial anchor ─── */
+.book {
+  position: relative;
+  width: min(92vw, 1400px);
+  height: min(78vh, 820px);
+  margin-bottom: 64px;
+  display: flex;
+  transition:
+    width 1200ms var(--spring-paper),
+    height 1200ms var(--spring-paper),
+    transform 1200ms var(--spring-paper),
+    filter 900ms ease;
+}
+
+.book-half {
+  flex: 1;
+  background: var(--paper);
+  position: relative;
+  transition: all 1200ms var(--spring-paper);
+  box-shadow:
+    inset 0 0 80px rgba(50, 35, 20, 0.08),
+    inset 0 0 0 1px rgba(50, 35, 20, 0.04);
+}
+.book-half.verso {
+  border-radius: 2px 0 0 2px;
+  background:
+    linear-gradient(to right, var(--paper-shadow) 0%, var(--paper) 3%, var(--paper-warm) 100%);
+}
+.book-half.recto {
+  border-radius: 0 2px 2px 0;
+  background:
+    linear-gradient(to left, var(--paper-shadow) 0%, var(--paper) 3%, var(--paper-warm) 100%);
+}
+
+.gutter {
+  position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 28px; transform: translateX(-50%);
+  background:
+    linear-gradient(to right,
+      transparent 0%,
+      rgba(0,0,0,0.18) 35%,
+      rgba(0,0,0,0.28) 50%,
+      rgba(0,0,0,0.18) 65%,
+      transparent 100%);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Paper grain */
+.book-half::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(80,50,20,0.025) 0%, transparent 40%),
+    radial-gradient(circle at 70% 80%, rgba(80,50,20,0.02) 0%, transparent 50%);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+/* Page edges catch light — Liquid Glass, disciplined */
+.book-half::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 12px;
+  background: linear-gradient(90deg,
+    rgba(255,240,210,0.22) 0%,
+    transparent 100%);
+  pointer-events: none;
+}
+.book-half.verso::after { right: 0; background: linear-gradient(270deg, rgba(255,240,210,0.22) 0%, transparent 100%); }
+.book-half.recto::after { left: 0; }
+
+/* ─── Typography primitives ─── */
+.serif { font-family: 'Literata', Georgia, serif; }
+.sans { font-family: 'Inter', -apple-system, sans-serif; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+.label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  font-weight: 500;
+}
+
+/* ─── Reusable marginalia ─── */
+.margin-band {
+  position: relative;
+  padding: 0 0 0 18px;
+  border-left: 1px solid var(--ink-faint);
+  font-family: 'Literata', serif;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.margin-band.sam { border-left-color: var(--amber); }
+.margin-band.ellis { border-left-color: var(--teal); }
+.margin-band.kit { border-left-color: var(--rose); }
+.margin-band.after-dark { border-left-color: var(--fuchsia); }
+
+.agent-tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-bottom: 6px;
+}
+.agent-tag.sam { color: var(--amber); }
+.agent-tag.ellis { color: var(--teal); }
+.agent-tag.kit { color: var(--rose); }
+.agent-tag.after-dark { color: var(--fuchsia); }
+
+/* ─── Aura — the voice visualizer ─── */
+.aura {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(18px);
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+.aura.active { opacity: 0.55; }
+.aura.sam {
+  background: radial-gradient(circle, var(--amber) 0%, transparent 70%);
+  animation: breathe-slow 1.67s ease-in-out infinite;
+}
+.aura.ellis {
+  background: radial-gradient(circle, var(--teal) 0%, transparent 70%);
+  animation: breathe-tight 1.1s ease-in-out infinite;
+}
+.aura.kit {
+  background: radial-gradient(circle, var(--rose) 0%, transparent 70%);
+  animation: breathe-sharp 0.75s ease-in-out infinite;
+}
+.aura.after-dark {
+  background: radial-gradient(circle, var(--fuchsia) 0%, transparent 75%);
+  animation: breathe-deep 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe-slow {
+  0%, 100% { transform: scale(0.92); opacity: 0.35; }
+  50%      { transform: scale(1.08); opacity: 0.65; }
+}
+@keyframes breathe-tight {
+  0%, 100% { transform: scale(0.96); opacity: 0.4; }
+  50%      { transform: scale(1.04); opacity: 0.6; }
+}
+@keyframes breathe-sharp {
+  0%   { transform: scale(0.9); opacity: 0.3; }
+  30%  { transform: scale(1.12); opacity: 0.7; }
+  100% { transform: scale(0.9); opacity: 0.3; }
+}
+@keyframes breathe-deep {
+  0%, 100% { transform: scale(0.88); opacity: 0.3; }
+  50%      { transform: scale(1.14); opacity: 0.55; }
+}
+
+/* ─── Citation thread ─── */
+.thread-svg {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.thread-path {
+  fill: none;
+  stroke-width: 0.6;
+  stroke-linecap: round;
+  stroke-dasharray: 400;
+  stroke-dashoffset: 400;
+  animation: draw-thread 1.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  opacity: 0.7;
+}
+@keyframes draw-thread {
+  to { stroke-dashoffset: 0; }
+}
+
+/* ─── Citation confidence (typographic, not labels) ─── */
+/* exact: clean solid underline */
+.cite-exact { border-bottom: 1px solid var(--exact); padding-bottom: 1px; }
+/* normalized: double hairline */
+.cite-normalized {
+  border-bottom: 2px double var(--normalized);
+  padding-bottom: 1px;
+}
+/* fuzzy: dashed */
+.cite-fuzzy {
+  border-bottom: 1px dashed var(--fuzzy);
+  padding-bottom: 1px;
+}
+/* unverified: wavy, un-settled — catches the eye */
+.cite-unverified {
+  text-decoration: underline wavy var(--unverified);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  animation: waver 5s ease-in-out infinite;
+}
+@keyframes waver {
+  0%, 100% { letter-spacing: 0; }
+  50% { letter-spacing: 0.008em; }
+}
+
+/* ─── Cursor-as-instrument ─── */
+.world.cursor-reader { cursor: text; }
+.world.cursor-quill  { cursor: crosshair; }
+.world.cursor-loupe  { cursor: zoom-in; }
+.world.cursor-finger { cursor: pointer; }
+
+/* ─── Controls — the Atelier ─── */
+.atelier {
+  position: fixed;
+  top: 18px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex; gap: 4px;
+  padding: 5px;
+  background: rgba(12, 10, 9, 0.72);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 100px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+}
+.atelier button {
+  background: transparent;
+  border: none;
+  color: rgba(245,235,210,0.55);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+.atelier button:hover { color: rgba(245,235,210,0.9); }
+.atelier button.active {
+  color: var(--paper);
+  background: rgba(200,134,31,0.18);
+  box-shadow: inset 0 0 0 1px rgba(200,134,31,0.3);
+}
+.world.after-dark .atelier button.active {
+  background: rgba(232,121,249,0.18);
+  box-shadow: inset 0 0 0 1px rgba(232,121,249,0.35);
+}
+
+/* ─── Tweaks panel ─── */
+.tweaks {
+  position: fixed;
+  bottom: 20px; right: 20px;
+  z-index: 60;
+  width: 280px;
+  background: rgba(12,10,9,0.86);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 18px;
+  color: rgba(245,235,210,0.9);
+  font-family: 'Inter', sans-serif;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+}
+.tweaks h4 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(245,235,210,0.5);
+  margin-bottom: 14px;
+  font-weight: 500;
+}
+.tweak-row { margin-bottom: 14px; }
+.tweak-row label {
+  display: block;
+  font-size: 11px;
+  color: rgba(245,235,210,0.6);
+  margin-bottom: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+}
+.tweak-row .value {
+  color: rgba(245,235,210,0.9);
+  font-size: 12px;
+}
+.tweak-row .options {
+  display: flex; gap: 4px; flex-wrap: wrap;
+}
+.tweak-row .options button {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  color: rgba(245,235,210,0.7);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.tweak-row .options button:hover { border-color: rgba(255,255,255,0.15); }
+.tweak-row .options button.on {
+  background: rgba(200,134,31,0.18);
+  border-color: rgba(200,134,31,0.4);
+  color: rgba(250,230,190,0.95);
+}
+
+/* ─── Ambient whisper indicator ─── */
+.whisper-strip {
+  position: absolute; bottom: 30px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 4px;
+  align-items: center;
+}
+.whisper-strip .dot {
+  width: 3px; height: 3px; border-radius: 50%;
+  background: rgba(245,235,210,0.3);
+  animation: whisper 3s ease-in-out infinite;
+}
+@keyframes whisper {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50%      { opacity: 0.7; transform: scale(1.1); }
+}
+
+/* ─── Page turn — a leaf rotating on its spine edge ─── */
+.page-turn-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  perspective: 2400px;
+  perspective-origin: 50% 50%;
+}
+
+.page-turn-leaf {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: min(46vw, 700px);
+  height: min(78vh, 820px);
+  transform-origin: 0% 50%;
+  transform: translate(0%, -50%) rotateY(0deg);
+  transform-style: preserve-3d;
+  background: var(--paper-warm);
+  box-shadow:
+    inset 20px 0 40px rgba(50,35,20,0.15),
+    inset 0 0 60px rgba(50,35,20,0.06);
+  animation: page-turn 1100ms cubic-bezier(0.55, 0.05, 0.25, 1) forwards;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.page-turn-leaf::before {
+  /* back face — darker, paper-underside */
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, rgba(40,25,10,0.08) 0%, transparent 40%),
+    var(--paper-shadow);
+  transform: rotateY(180deg);
+  backface-visibility: hidden;
+  box-shadow: inset 20px 0 30px rgba(40,25,10,0.12);
+}
+.page-turn-leaf::after {
+  /* front-face sheen */
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(270deg,
+    rgba(255,240,210,0.25) 0%,
+    transparent 30%,
+    transparent 70%,
+    rgba(30,20,8,0.18) 100%);
+  backface-visibility: hidden;
+}
+
+/* cast shadow onto the spread underneath */
+.page-turn-shadow {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: min(46vw, 700px);
+  height: min(78vh, 820px);
+  transform-origin: right center;
+  transform: translate(0%, -50%);
+  background: linear-gradient(270deg,
+    rgba(0,0,0,0.28) 0%,
+    rgba(0,0,0,0.12) 60%,
+    transparent 100%);
+  animation: page-turn-shadow 1100ms cubic-bezier(0.55, 0.05, 0.25, 1) forwards;
+  filter: blur(12px);
+  opacity: 0;
+}
+
+@keyframes page-turn {
+  0%   { transform: translate(0%, -50%) rotateY(0deg); }
+  100% { transform: translate(0%, -50%) rotateY(-180deg); }
+}
+@keyframes page-turn-shadow {
+  0%   { opacity: 0; width: 0; }
+  30%  { opacity: 0.5; }
+  100% { opacity: 0; width: min(46vw, 700px); }
+}
+
+/* Reverse direction — when moving "back" (e.g. spread → shelf) */
+.page-turn-leaf.reverse {
+  transform-origin: 100% 50%;
+  transform: translate(-100%, -50%) rotateY(0deg);
+  animation: page-turn-rev 1100ms cubic-bezier(0.55, 0.05, 0.25, 1) forwards;
+}
+@keyframes page-turn-rev {
+  0%   { transform: translate(-100%, -50%) rotateY(0deg); }
+  100% { transform: translate(-100%, -50%) rotateY(180deg); }
+}
+.page-turn-shadow.reverse {
+  transform-origin: left center;
+  transform: translate(-100%, -50%);
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0.28) 0%,
+    rgba(0,0,0,0.12) 60%,
+    transparent 100%);
+  animation: page-turn-shadow-rev 1100ms cubic-bezier(0.55, 0.05, 0.25, 1) forwards;
+}
+@keyframes page-turn-shadow-rev {
+  0%   { opacity: 0; width: 0; }
+  30%  { opacity: 0.5; }
+  100% { opacity: 0; width: min(46vw, 700px); }
+}
+
+.reduce-motion .page-turn-leaf,
+.reduce-motion .page-turn-shadow { display: none; }
+.fade-in {
+  animation: fade-in 800ms var(--spring-paper);
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Dusk motes ─── */
+.mote {
+  position: absolute;
+  width: 2px; height: 2px;
+  background: rgba(245,235,210,0.4);
+  border-radius: 50%;
+  filter: blur(0.5px);
+  animation: drift 20s linear infinite;
+}
+@keyframes drift {
+  from { transform: translate(0, 0); opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.6; }
+  to   { transform: translate(40px, -120px); opacity: 0; }
+}
+
+/* ─── Scrollable sections of book ─── */
+.page-content {
+  position: absolute;
+  inset: 0;
+  padding: 64px 56px 72px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .page-content { padding: 36px 28px 48px; }
+}
+
+.reduce-motion * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 150ms !important;
+}
+
+/* Hostile-question footnote */
+.hostile-note {
+  position: fixed;
+  bottom: 20px; left: 20px;
+  z-index: 40;
+  max-width: 300px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  color: rgba(245,235,210,0.42);
+  letter-spacing: 0.02em;
+}
+.hostile-note .q { color: rgba(245,235,210,0.7); }
+
+/* selection */
+::selection { background: rgba(200,134,31,0.3); color: var(--ink); }
+.world.after-dark ::selection { background: rgba(232,121,249,0.3); }
+
+/* Lifted line — when Ellis extracts a quote */
+.lift {
+  display: inline-block;
+  position: relative;
+  transition: transform 800ms var(--spring-paper), color 800ms ease;
+}
+.lift.lifted {
+  transform: translate(110%, -20px) scale(1.04);
+  color: var(--teal);
+  text-shadow: 0 0 20px rgba(31,138,122,0.3);
+  z-index: 4;
+}
+
+/* unstable ink for unverified spans — body copy */
+.unstable-ink {
+  color: var(--unverified);
+  animation: unstable 6s ease-in-out infinite;
+}
+@keyframes unstable {
+  0%, 100% { opacity: 0.95; filter: blur(0); }
+  50% { opacity: 0.82; filter: blur(0.25px); }
+}
+
+/* Footnote mark — Kit */
+.fn-mark {
+  font-family: 'Literata', serif;
+  font-size: 0.72em;
+  vertical-align: super;
+  color: var(--rose);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 200ms ease;
+}
+.fn-mark:hover { color: var(--fuchsia); }
+
+/* Interlinear gloss — Ellis */
+.gloss {
+  display: block;
+  font-family: 'Literata', serif;
+  font-style: italic;
+  font-size: 11.5px;
+  color: var(--teal);
+  letter-spacing: 0.01em;
+  margin: 2px 0 4px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+/* Constellation */
+.star {
+  position: absolute;
+  width: 2px; height: 2px;
+  background: rgba(245,235,210,0.8);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(245,235,210,0.5);
+}
+.star.bright { width: 4px; height: 4px; box-shadow: 0 0 14px rgba(245,235,210,0.8); }
+.star.amber { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+.star.teal  { background: var(--teal);  box-shadow: 0 0 10px var(--teal); }
+.star.rose  { background: var(--rose);  box-shadow: 0 0 10px var(--rose); }

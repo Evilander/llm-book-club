@@ -61,6 +61,12 @@ export default function RootLayout({
                     </p>
                   </div>
                 </Link>
+                <Link
+                  href="/literary"
+                  className="font-label text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70 hover:text-primary transition-colors border border-white/10 hover:border-primary/40 px-3 py-2 rounded-full"
+                >
+                  Literary instrument ↗
+                </Link>
               </div>
             </div>
           </header>
