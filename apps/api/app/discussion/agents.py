@@ -6,6 +6,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..providers.llm.base import (
@@ -13,16 +14,26 @@ from ..providers.llm.base import (
     LLMClient,
     LLMMessage,
     LLMResponse,
+    StructuredLLMResponse,
+    StructuredOutputError,
 )
 from ..retrieval.search import search_chunks, SearchResult
 from ..retrieval.filters import build_evidence_block, flag_suspicious_chunks
 from ..settings import settings
-from .prompts import get_agent_prompt
 from .memory_prompts import MemoryContext, get_memory_aware_prompt
-from .token_budget import trim_evidence, estimate_tokens
+from .token_budget import trim_evidence
 from .metrics import CitationMetrics, build_citation_metrics
+from .grounded_response import (
+    GROUNDED_RESPONSE_INSTRUCTION,
+    GROUNDING_FALLBACK_TEXT,
+    GroundedResponseInput,
+    GroundedValidationResult,
+    grounded_response_json_schema,
+    validate_grounded_response,
+)
 
 logger = logging.getLogger(__name__)
+GROUNDING_SCHEMA_NAME = "book_discussion_grounded_response"
 
 
 @dataclass
@@ -35,6 +46,8 @@ class Citation:
     verified: bool = False
     match_type: str | None = None  # "exact", "normalized", "near_match", None
     match_score: float | None = None
+    citation_id: str | None = None
+    segment_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -46,6 +59,8 @@ class AgentResponse:
     citation_metrics: CitationMetrics | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    segments: list[dict] = field(default_factory=list)
+    grounding_metadata: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +598,15 @@ class BaseAgent:
             self.agent_type, mode, context, memory,
             adult_mode=adult_mode,
         )
+        if self.uses_grounded_segments:
+            self.system_prompt += "\n\n" + GROUNDED_RESPONSE_INSTRUCTION
+
+    @property
+    def uses_grounded_segments(self) -> bool:
+        return bool(
+            settings.grounded_segments_enabled
+            and callable(getattr(self.llm, "complete_structured", None))
+        )
 
     def _build_retrieval_context(self, results: list[SearchResult]) -> str:
         """
@@ -688,6 +712,9 @@ class BaseAgent:
                 char_end=c.get("char_end"),
                 verified=c.get("verified", False),
                 match_type=c.get("match_type"),
+                match_score=c.get("match_score"),
+                citation_id=c.get("citation_id"),
+                segment_ids=list(c.get("segment_ids") or []),
             )
             for c in all_citation_dicts
         ]
@@ -705,6 +732,265 @@ class BaseAgent:
 
         return clean_text, citation_objects, cit_metrics
 
+    def _validate_structured_attempt(
+        self,
+        response: StructuredLLMResponse,
+    ) -> tuple[GroundedValidationResult | None, str | None]:
+        if response.refusal:
+            return None, "provider_refusal"
+        if response.parsed is None:
+            return None, "missing_structured_object"
+        try:
+            grounded = GroundedResponseInput.model_validate(response.parsed)
+        except ValidationError:
+            return None, "schema_validation_failed"
+        return (
+            validate_grounded_response(
+                self.db,
+                grounded,
+                allowed_chunk_ids=self.allowed_chunk_ids or None,
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _grounded_quality(result: GroundedValidationResult) -> tuple[int, int, int]:
+        invalid_count = len(result.invalid_citations) + len(result.dropped_segments)
+        return (
+            -invalid_count,
+            result.metrics["retained_claim_segments"],
+            result.metrics["retained_segments"],
+        )
+
+    @staticmethod
+    def _grounding_issues(
+        result: GroundedValidationResult | None,
+        schema_error: str | None,
+    ) -> list[dict]:
+        issues: list[dict] = []
+        if schema_error:
+            issues.append({"code": schema_error})
+        if result is None:
+            return issues
+        for issue in result.issues:
+            issues.append(
+                {
+                    key: issue[key]
+                    for key in ("code", "segment_id", "citation_ids")
+                    if key in issue
+                }
+            )
+        for citation in result.invalid_citations:
+            issues.append(
+                {
+                    "code": "invalid_citation",
+                    "citation_id": citation.get("citation_id"),
+                    "chunk_id": citation.get("chunk_id"),
+                    "reason": citation.get("reason"),
+                }
+            )
+        return issues
+
+    async def _complete_grounded(
+        self,
+        messages: list[LLMMessage],
+        *,
+        temperature: float,
+    ) -> AgentResponse:
+        complete_structured = getattr(self.llm, "complete_structured")
+        schema = grounded_response_json_schema()
+        input_tokens = 0
+        output_tokens = 0
+        initial_response: StructuredLLMResponse | None = None
+        initial_result: GroundedValidationResult | None = None
+        initial_error: str | None = None
+
+        try:
+            initial_response = await complete_structured(
+                messages,
+                schema_name=GROUNDING_SCHEMA_NAME,
+                json_schema=schema,
+                temperature=temperature,
+                max_tokens=settings.max_tokens_per_turn,
+            )
+            input_tokens += initial_response.input_tokens
+            output_tokens += initial_response.output_tokens
+            initial_result, initial_error = self._validate_structured_attempt(
+                initial_response
+            )
+        except StructuredOutputError:
+            initial_error = "invalid_provider_json"
+
+        if initial_response is not None and initial_response.refusal:
+            refusal = initial_response.refusal.strip() or GROUNDING_FALLBACK_TEXT
+            return AgentResponse(
+                content=refusal,
+                citations=[],
+                agent_type=self.agent_type,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                segments=[
+                    {
+                        "id": "provider-refusal",
+                        "kind": "reader_reflection",
+                        "text": refusal,
+                        "citation_ids": [],
+                    }
+                ],
+                grounding_metadata={
+                    "schema": "grounded_response_v1",
+                    "refused": True,
+                    "repair_attempted": False,
+                    "repair_succeeded": False,
+                },
+            )
+
+        repair_needed = bool(
+            initial_result is None
+            or initial_result.dropped_segments
+            or initial_result.invalid_citations
+        )
+        repair_attempted = False
+        repair_succeeded = False
+        repair_result: GroundedValidationResult | None = None
+        repair_error: str | None = None
+
+        if repair_needed:
+            repair_attempted = True
+            issue_payload = self._grounding_issues(initial_result, initial_error)
+            original = initial_response.content if initial_response is not None else ""
+            repair_prompt = (
+                "Repair the structured book-discussion response below. Correct every "
+                "listed issue using only evidence in the system message. Remove any "
+                "claim that cannot be supported. Return only the schema-constrained "
+                "response.\n\nVALIDATION ISSUES:\n"
+                + json.dumps(issue_payload, ensure_ascii=False)
+                + "\n\nORIGINAL RESPONSE:\n"
+                + original
+            )
+            repair_messages = [
+                messages[0],
+                LLMMessage(role="user", content=repair_prompt),
+            ]
+            try:
+                repaired_response = await complete_structured(
+                    repair_messages,
+                    schema_name=GROUNDING_SCHEMA_NAME,
+                    json_schema=schema,
+                    temperature=0.2,
+                    max_tokens=settings.max_tokens_per_turn,
+                )
+                input_tokens += repaired_response.input_tokens
+                output_tokens += repaired_response.output_tokens
+                repair_result, repair_error = self._validate_structured_attempt(
+                    repaired_response
+                )
+            except StructuredOutputError:
+                repair_error = "invalid_provider_json"
+            except Exception:
+                repair_error = "repair_request_failed"
+                logger.warning("Grounded response repair failed.", exc_info=True)
+
+        selected = initial_result
+        if repair_result is not None and (
+            selected is None
+            or self._grounded_quality(repair_result) > self._grounded_quality(selected)
+        ):
+            selected = repair_result
+            repair_succeeded = True
+
+        if selected is None:
+            issue_codes = [initial_error, repair_error]
+            return AgentResponse(
+                content=GROUNDING_FALLBACK_TEXT,
+                citations=[],
+                agent_type=self.agent_type,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                segments=[
+                    {
+                        "id": "grounding-fallback",
+                        "kind": "question",
+                        "text": GROUNDING_FALLBACK_TEXT,
+                        "citation_ids": [],
+                    }
+                ],
+                grounding_metadata={
+                    "schema": "grounded_response_v1",
+                    "refused": False,
+                    "repair_attempted": repair_attempted,
+                    "repair_succeeded": False,
+                    "fallback_used": True,
+                    "issue_codes": [code for code in issue_codes if code],
+                },
+            )
+
+        citation_objects = [
+            Citation(
+                chunk_id=citation.get("chunk_id", ""),
+                text=citation.get("text", ""),
+                char_start=citation.get("char_start"),
+                char_end=citation.get("char_end"),
+                verified=True,
+                match_type=citation.get("match_type"),
+                match_score=citation.get("match_score"),
+                citation_id=citation.get("citation_id"),
+                segment_ids=list(citation.get("segment_ids") or []),
+            )
+            for citation in selected.citations
+        ]
+        citation_metrics = build_citation_metrics(
+            selected.citations,
+            selected.invalid_citations,
+            repair_attempted=repair_attempted,
+            repair_succeeded=repair_succeeded,
+            post_repair_verified=(
+                len(repair_result.citations) if repair_result is not None else 0
+            ),
+            post_repair_invalid=(
+                len(repair_result.invalid_citations)
+                if repair_result is not None
+                else 0
+            ),
+        )
+        citation_metrics.log_summary(self.agent_type)
+
+        content = selected.content or GROUNDING_FALLBACK_TEXT
+        segments = list(selected.segments)
+        fallback_used = not selected.content
+        if fallback_used:
+            segments = [
+                {
+                    "id": "grounding-fallback",
+                    "kind": "question",
+                    "text": GROUNDING_FALLBACK_TEXT,
+                    "citation_ids": [],
+                }
+            ]
+        issue_codes = {
+            issue.get("code")
+            for issue in self._grounding_issues(selected, repair_error)
+            if issue.get("code")
+        }
+        return AgentResponse(
+            content=content,
+            citations=citation_objects,
+            agent_type=self.agent_type,
+            citation_metrics=citation_metrics,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            segments=segments,
+            grounding_metadata={
+                "schema": "grounded_response_v1",
+                "refused": False,
+                "repair_attempted": repair_attempted,
+                "repair_succeeded": repair_succeeded,
+                "fallback_used": fallback_used,
+                "issue_codes": sorted(issue_codes),
+                "metrics": selected.metrics,
+            },
+        )
+
     async def respond(
         self,
         conversation: list[LLMMessage],
@@ -715,6 +1001,9 @@ class BaseAgent:
             LLMMessage(role="system", content=self.system_prompt),
             *conversation,
         ]
+
+        if self.uses_grounded_segments:
+            return await self._complete_grounded(messages, temperature=temperature)
 
         llm_response = await self.llm.complete_with_usage(
             messages,
@@ -753,6 +1042,8 @@ class BaseAgent:
                 section_ids=self.allowed_section_ids or None,
             )
             additional_context = self._build_retrieval_context(results)
+        else:
+            self._last_retrieved_chunks = []
 
         enhanced_system = self.system_prompt
         if additional_context:
@@ -765,6 +1056,9 @@ class BaseAgent:
             LLMMessage(role="system", content=enhanced_system),
             *conversation,
         ]
+
+        if self.uses_grounded_segments:
+            return await self._complete_grounded(messages, temperature=temperature)
 
         llm_response = await self.llm.complete_with_usage(
             messages,
@@ -862,7 +1156,10 @@ Give us 2-3 great opening questions that will get a real conversation going. Pic
 
 Start with a warm, brief welcome that acknowledges what we're reading, then jump into the questions. If this text is known for being challenging, acknowledge that — make it approachable."""
 
-        return await self.respond([LLMMessage(role="user", content=prompt)])
+        return await self.respond_with_retrieval(
+            [LLMMessage(role="user", content=prompt)],
+            query="striking moments, tensions, and questions in this reading",
+        )
 
 
 class CloseReaderAgent(BaseAgent):
@@ -884,7 +1181,10 @@ Focus on:
 
 Always cite specific parts of the passage."""
 
-        return await self.respond([LLMMessage(role="user", content=prompt)])
+        return await self.respond_with_retrieval(
+            [LLMMessage(role="user", content=prompt)],
+            query=passage,
+        )
 
 
 class SkepticAgent(BaseAgent):
@@ -905,7 +1205,10 @@ Please offer a thoughtful response that:
 
 Be curious and constructive, not dismissive."""
 
-        return await self.respond([LLMMessage(role="user", content=prompt)])
+        return await self.respond_with_retrieval(
+            [LLMMessage(role="user", content=prompt)],
+            query=claim,
+        )
 
 
 class AfterDarkGuideAgent(BaseAgent):
@@ -927,4 +1230,7 @@ Focus on:
 
 Stay grounded in the text and cite exact evidence."""
 
-        return await self.respond([LLMMessage(role="user", content=prompt)])
+        return await self.respond_with_retrieval(
+            [LLMMessage(role="user", content=prompt)],
+            query=passage,
+        )

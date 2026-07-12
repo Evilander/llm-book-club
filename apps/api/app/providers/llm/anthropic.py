@@ -1,12 +1,19 @@
 """Anthropic Claude LLM provider."""
 from __future__ import annotations
 import json
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 import httpx
 
 from ...settings import settings
-from .base import EVIDENCE_CACHE_BOUNDARY, LLMMessage, LLMResponse
+from .base import (
+    EVIDENCE_CACHE_BOUNDARY,
+    LLMMessage,
+    LLMResponse,
+    StructuredLLMResponse,
+    StructuredOutputError,
+    parse_json_object,
+)
 
 
 # Minimum byte length Anthropic requires for a cache block to be billable.
@@ -164,6 +171,62 @@ class AnthropicClient:
                 output_tokens=usage.get("output_tokens", 0),
                 model=data.get("model", self.model),
             )
+
+    async def complete_structured(
+        self,
+        messages: list[LLMMessage],
+        *,
+        schema_name: str,
+        json_schema: dict[str, Any],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ) -> StructuredLLMResponse:
+        """Generate JSON using Claude's native structured-output format."""
+        system_blocks, formatted_messages = self._format_messages(messages)
+        payload: dict = {
+            "model": self.model,
+            "messages": formatted_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": json_schema,
+                }
+            },
+        }
+        if system_blocks:
+            payload["system"] = system_blocks
+
+        assert self.api_key is not None
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{self.base_url}/messages",
+                headers=self._headers(self.api_key),
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        content = "".join(
+            block.get("text", "")
+            for block in data.get("content", [])
+            if block.get("type") == "text"
+        )
+        if not content:
+            raise StructuredOutputError(
+                f"Claude returned no structured text for schema {schema_name}"
+            )
+        refusal = content if data.get("stop_reason") == "refusal" else None
+        usage = data.get("usage", {})
+        return StructuredLLMResponse(
+            content=content,
+            parsed=None if refusal else parse_json_object(content),
+            refusal=refusal,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            model=data.get("model", self.model),
+        )
 
     async def stream(
         self,
