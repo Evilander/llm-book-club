@@ -8,10 +8,42 @@
 export interface CitationData {
   chunk_id: string;
   text: string;
+  /** Section that owns the cited chunk (grounded/verified citations). */
+  section_id?: string | null;
   char_start?: number | null;
   char_end?: number | null;
   verified?: boolean;
   match_type?: "exact" | "normalized" | "fuzzy" | null;
+  /** Provider-assigned citation id (grounded responses only). */
+  citation_id?: string | null;
+  /** IDs of the retained segments this citation supports. */
+  segment_ids?: string[];
+}
+
+export type GroundedSegmentKind =
+  | "grounded_claim"
+  | "interpretation"
+  | "question"
+  | "transition"
+  | "reader_reflection";
+
+/** A validated prose segment bound to its verified evidence. */
+export interface GroundedSegment {
+  id: string;
+  kind: GroundedSegmentKind;
+  text: string;
+  citation_ids: string[];
+}
+
+/** Server-side grounding validation metadata for one agent message. */
+export interface GroundingInfo {
+  schema?: string;
+  refused?: boolean;
+  repair_attempted?: boolean;
+  repair_succeeded?: boolean;
+  fallback_used?: boolean;
+  issue_codes?: string[];
+  metrics?: Record<string, number>;
 }
 
 export interface Message {
@@ -19,6 +51,8 @@ export interface Message {
   role: string;
   content: string;
   citations: CitationData[] | null;
+  segments?: GroundedSegment[] | null;
+  grounding?: GroundingInfo | null;
   created_at: string;
 }
 

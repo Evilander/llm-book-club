@@ -405,6 +405,7 @@ class DiscussionEngine:
             {
                 "chunk_id": c.chunk_id,
                 "text": c.text,
+                "section_id": c.section_id,
                 "char_start": c.char_start,
                 "char_end": c.char_end,
                 "verified": c.verified,

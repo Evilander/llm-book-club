@@ -36,6 +36,8 @@ import { useDiscussionSession } from "@/hooks/use-discussion-session";
 import type {
   CitationData,
   ExplorePayload,
+  GroundedSegment,
+  Message,
   SessionPreferences,
 } from "@/types/api";
 
@@ -217,6 +219,116 @@ function VoiceWaves({ active }: { active: boolean }) {
   );
 }
 
+/**
+ * Per-segment rendering for grounded agent messages. Any segment with
+ * verified evidence attached is clickable and reveals exactly the citations
+ * that support it; uncited questions, transitions, and reflections stay
+ * plain prose.
+ */
+function GroundedSegments({
+  segments,
+  selectedSegmentId,
+  onSelectSegment,
+}: {
+  segments: GroundedSegment[];
+  selectedSegmentId: string | null;
+  onSelectSegment: (segment: GroundedSegment) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      {segments.map((segment) => {
+        const hasEvidence = segment.citation_ids.length > 0;
+        const isSelected = selectedSegmentId === segment.id;
+        const body = (
+          <div className="prose prose-sm prose-invert max-w-none text-sm leading-relaxed prose-p:my-1">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{segment.text}</ReactMarkdown>
+          </div>
+        );
+
+        if (!hasEvidence) {
+          return <div key={segment.id}>{body}</div>;
+        }
+
+        return (
+          <div
+            key={segment.id}
+            role="button"
+            tabIndex={0}
+            title="Show the evidence behind this line"
+            onClick={() => onSelectSegment(segment)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onSelectSegment(segment);
+              }
+            }}
+            className={cn(
+              "group -mx-1.5 cursor-pointer rounded-lg border-l-2 px-1.5 py-0.5 transition-colors",
+              isSelected
+                ? "border-l-primary bg-primary/10"
+                : "border-l-transparent hover:border-l-primary/50 hover:bg-white/[0.04]"
+            )}
+          >
+            {body}
+            <span
+              className={cn(
+                "flex items-center gap-1 font-label text-[10px] uppercase tracking-wide transition-opacity",
+                isSelected
+                  ? "text-primary opacity-100"
+                  : "text-muted-foreground opacity-0 group-hover:opacity-70"
+              )}
+            >
+              <Quote className="h-2.5 w-2.5" />
+              {segment.citation_ids.length === 1
+                ? "1 verified quote"
+                : `${segment.citation_ids.length} verified quotes`}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Locate a quoted passage inside the reader's assembled section text.
+ * Citation char offsets are chunk-relative and the reader text is a joined
+ * chunk view, so textual search (exact, then whitespace/case-normalized)
+ * is the only coordinate-safe way to highlight the span.
+ */
+function locateQuote(
+  haystack: string,
+  quote: string
+): { start: number; end: number } | null {
+  if (!haystack || !quote) return null;
+  const exact = haystack.indexOf(quote);
+  if (exact !== -1) return { start: exact, end: exact + quote.length };
+
+  const map: number[] = [];
+  let norm = "";
+  let lastWasSpace = true;
+  for (let i = 0; i < haystack.length; i++) {
+    const ch = haystack[i];
+    if (/\s/.test(ch)) {
+      if (!lastWasSpace) {
+        norm += " ";
+        map.push(i);
+        lastWasSpace = true;
+      }
+    } else {
+      norm += ch.toLowerCase();
+      map.push(i);
+      lastWasSpace = false;
+    }
+  }
+  const normQuote = quote.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normQuote) return null;
+  const idx = norm.indexOf(normQuote);
+  if (idx === -1) return null;
+  const endIdx = Math.min(idx + normQuote.length - 1, map.length - 1);
+  return { start: map[idx], end: map[endIdx] + 1 };
+}
+
 function citationLabel(citation: CitationData) {
   if (citation.verified === false) {
     return "Unverified";
@@ -243,8 +355,12 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   const [explore, setExplore] = useState<ExplorePayload | null>(null);
   const [exploreLoading, setExploreLoading] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
-  const [highlightSpan, setHighlightSpan] = useState<{ charStart: number; charEnd: number } | null>(null);
+  const [highlightQuote, setHighlightQuote] = useState<string | null>(null);
   const [messageFeedback, setMessageFeedback] = useState<Record<string, "up" | "down" | null>>({});
+  const [selectedSegment, setSelectedSegment] = useState<{
+    messageId: string;
+    segmentId: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<HTMLElement>(null);
@@ -347,10 +463,10 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
   }, [readerSectionId, session?.book_id]);
 
   useEffect(() => {
-    if (highlightSpan && highlightRef.current) {
+    if (highlightQuote && highlightRef.current) {
       highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [highlightSpan]);
+  }, [highlightQuote, explore?.active_section?.id]);
 
   // Cleanup audio on unmount
   useEffect(() => () => stopAudio(), [stopAudio]);
@@ -394,6 +510,38 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     return rawSubmitMessage(prompt, {
       stopAudioBeforeSend: playingAudio ? stopAudio : undefined,
     });
+  }
+
+  function revealCitation(citation: CitationData) {
+    setSelectedCitation(citation);
+    if (citation.section_id) {
+      setReaderSectionId(citation.section_id);
+    }
+    if (citation.text) {
+      setHighlightQuote(citation.text);
+      setSidebarView("reader");
+    } else {
+      setSidebarView("club");
+    }
+    setMobileSidebar(true);
+  }
+
+  function handleSegmentSelect(message: Message, segment: GroundedSegment) {
+    const alreadySelected =
+      selectedSegment?.messageId === message.id &&
+      selectedSegment.segmentId === segment.id;
+    if (alreadySelected) {
+      setSelectedSegment(null);
+      return;
+    }
+    setSelectedSegment({ messageId: message.id, segmentId: segment.id });
+
+    const evidence = (message.citations || []).filter((citation) =>
+      citation.segment_ids?.includes(segment.id)
+    );
+    if (evidence[0]) {
+      revealCitation(evidence[0]);
+    }
   }
 
   async function sendMessage() {
@@ -574,6 +722,19 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
               const config = getAgentConfig(message.role, session?.preferences);
               const isUser = message.role === "user";
               const Icon = config.icon;
+              const activeSegmentId =
+                selectedSegment?.messageId === message.id
+                  ? selectedSegment.segmentId
+                  : null;
+              const segmentCitations = activeSegmentId
+                ? (message.citations || []).filter((citation) =>
+                    citation.segment_ids?.includes(activeSegmentId)
+                  )
+                : null;
+              const citationsFiltered = Boolean(segmentCitations?.length);
+              const visibleCitations = citationsFiltered
+                ? segmentCitations!
+                : message.citations || [];
               return (
                 <div key={message.id} className={cn("flex gap-3", isUser && "flex-row-reverse")}>
                   <div
@@ -664,7 +825,13 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                       </div>
                     ) : null}
 
-                    {message.content ? (
+                    {!isUser && message.segments?.length ? (
+                      <GroundedSegments
+                        segments={message.segments}
+                        selectedSegmentId={activeSegmentId}
+                        onSelectSegment={(segment) => handleSegmentSelect(message, segment)}
+                      />
+                    ) : message.content ? (
                       <div className="prose prose-sm prose-invert max-w-none text-sm leading-relaxed prose-p:my-1.5">
                         <ReactMarkdown
                           remarkPlugins={[remarkGfm]}
@@ -688,28 +855,27 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                       <p className="text-sm italic opacity-60">Thinking...</p>
                     )}
 
-                    {message.citations?.length ? (
+                    {visibleCitations.length ? (
                       <div className="mt-3 border-t border-current/10 pt-3">
-                        <p className="mb-2 flex items-center gap-1 text-xs font-medium opacity-70">
+                        <div className="mb-2 flex items-center gap-1 text-xs font-medium opacity-70">
                           <Quote className="h-3 w-3" />
-                          Citations
-                        </p>
+                          {citationsFiltered ? "Evidence for the selected line" : "Citations"}
+                          {citationsFiltered ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSegment(null)}
+                              className="ml-auto rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide opacity-70 transition-opacity hover:opacity-100"
+                            >
+                              Show all
+                            </button>
+                          ) : null}
+                        </div>
                         <div className="space-y-1.5">
-                          {message.citations.map((citation, index) => (
+                          {visibleCitations.map((citation, index) => (
                             <button
                               key={`${message.id}-${index}`}
                               type="button"
-                              onClick={() => {
-                                setSelectedCitation(citation);
-                                if (citation.char_start != null && citation.char_end != null) {
-                                  setHighlightSpan({ charStart: citation.char_start, charEnd: citation.char_end });
-                                  setSidebarView("reader");
-                                  setMobileSidebar(true);
-                                } else {
-                                  setSidebarView("club");
-                                  setMobileSidebar(true);
-                                }
-                              }}
+                              onClick={() => revealCitation(citation)}
                               className="flex w-full items-start gap-2 rounded-xl px-2 py-1 text-left text-xs transition-colors hover:bg-black/10"
                             >
                               <span
@@ -1022,21 +1188,28 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
                       </p>
                       <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-foreground/90 font-serif">
                         {explore?.active_section?.text ? (
-                          highlightSpan ? (
-                            <>
-                              {explore.active_section.text.slice(0, highlightSpan.charStart)}
-                              <mark
-                                ref={highlightRef}
-                                className="bg-primary/25 text-foreground rounded px-0.5 ring-2 ring-primary/40 animate-pulse-glow"
-                                onClick={() => setHighlightSpan(null)}
-                              >
-                                {explore.active_section.text.slice(highlightSpan.charStart, highlightSpan.charEnd)}
-                              </mark>
-                              {explore.active_section.text.slice(highlightSpan.charEnd)}
-                            </>
-                          ) : (
-                            explore.active_section.text
-                          )
+                          (() => {
+                            const sectionText = explore.active_section.text;
+                            const range = highlightQuote
+                              ? locateQuote(sectionText, highlightQuote)
+                              : null;
+                            if (!range) {
+                              return sectionText;
+                            }
+                            return (
+                              <>
+                                {sectionText.slice(0, range.start)}
+                                <mark
+                                  ref={highlightRef}
+                                  className="bg-primary/25 text-foreground rounded px-0.5 ring-2 ring-primary/40 animate-pulse-glow"
+                                  onClick={() => setHighlightQuote(null)}
+                                >
+                                  {sectionText.slice(range.start, range.end)}
+                                </mark>
+                                {sectionText.slice(range.end)}
+                              </>
+                            );
+                          })()
                         ) : (
                           "Pick a section to open the text here."
                         )}

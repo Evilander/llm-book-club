@@ -48,6 +48,9 @@ class Citation:
     match_score: float | None = None
     citation_id: str | None = None
     segment_ids: list[str] = field(default_factory=list)
+    # Section that owns the cited chunk; lets the reader open the right
+    # section before locating the quote.
+    section_id: str | None = None
 
 
 @dataclass
@@ -403,6 +406,7 @@ def verify_citations(
             char_start, char_end, match_type = span
             verified.append({
                 **citation,
+                "section_id": str(chunk.section_id),
                 "char_start": char_start,
                 "char_end": char_end,
                 "verified": True,
@@ -715,6 +719,7 @@ class BaseAgent:
                 match_score=c.get("match_score"),
                 citation_id=c.get("citation_id"),
                 segment_ids=list(c.get("segment_ids") or []),
+                section_id=c.get("section_id"),
             )
             for c in all_citation_dicts
         ]
@@ -936,6 +941,7 @@ class BaseAgent:
                 match_score=citation.get("match_score"),
                 citation_id=citation.get("citation_id"),
                 segment_ids=list(citation.get("segment_ids") or []),
+                section_id=citation.get("section_id"),
             )
             for citation in selected.citations
         ]

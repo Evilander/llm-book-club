@@ -1,5 +1,18 @@
 # Fable 5 handoff — LLM Book Club
 
+> **Status update (2026-07-12, Fable 5):** The grounded-segment rollout in §7.6/§10
+> is complete. Engine parity tests exist (`tests/test_grounded_engine.py`), session
+> routes and `GET /messages` project `segments`/`grounding`, the frontend retains and
+> renders them with sentence-to-evidence linking, and citations now carry `section_id`
+> with quote-located reader highlights (chunk-relative offsets are no longer applied
+> to section text). Live-verified against real OpenAI structured output (exact-match
+> citation, no repair) and a real browser discussion with reload persistence and zero
+> console errors. Gates: backend 566 passed, next build clean, npm audit 0, tsc clean.
+> Also fixed: `run_worker_win.py` used SIGALRM-based timeouts (crashes on Windows);
+> now uses `TimerDeathPenalty` and listens on the catalog queue too.
+> Known open items: `start-discussion` can double-fire (two opening rows — needs a
+> server-side idempotency guard), and TTS/audio mode was not exercised in this pass.
+
 This is the operational handoff for the next SOTA coding agent. The product goal is
 not merely "RAG over books." It is a private, daily-driver reading and listening
 environment for a very large personal library, with trustworthy discussion attached

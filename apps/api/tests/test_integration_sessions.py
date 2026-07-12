@@ -783,3 +783,107 @@ class TestMessageLimit:
             )
             assert resp.status_code == 400
             assert "limit" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Tests: grounded segment projection on session endpoints
+# ---------------------------------------------------------------------------
+
+
+def _grounded_message_rows(session_id: str) -> tuple[Message, Message]:
+    """A legacy user message plus an agent message with grounded metadata."""
+    user_row = Message(
+        id=str(uuid.uuid4()),
+        session_id=session_id,
+        role=MessageRole.USER,
+        content="What does relativity change?",
+    )
+    agent_row = Message(
+        id=str(uuid.uuid4()),
+        session_id=session_id,
+        role=MessageRole.FACILITATOR,
+        content="Relativity reframes simultaneity itself.",
+        citations=[
+            {
+                "chunk_id": "chunk-1",
+                "text": "the laws of physics are the same",
+                "char_start": 10,
+                "char_end": 44,
+                "verified": True,
+                "match_type": "exact",
+                "match_score": 1.0,
+                "citation_id": "c1",
+                "segment_ids": ["claim"],
+            }
+        ],
+        metadata_json={
+            "citation_metrics": {"verified_citations": 1},
+            "grounded_response": {
+                "schema": "grounded_response_v1",
+                "refused": False,
+                "repair_attempted": False,
+                "repair_succeeded": False,
+                "fallback_used": False,
+                "issue_codes": [],
+                "metrics": {"retained_claim_segments": 1},
+                "segments": [
+                    {
+                        "id": "claim",
+                        "kind": "interpretation",
+                        "text": "Relativity reframes simultaneity itself.",
+                        "citation_ids": ["c1"],
+                    }
+                ],
+            },
+        },
+    )
+    return user_row, agent_row
+
+
+class TestGroundedProjection:
+    """Grounded segments survive the HTTP round trip on every read path."""
+
+    def test_message_history_projects_segments_and_grounding(
+        self, client, active_session
+    ):
+        session = active_session["session"]
+        db = active_session["db"]
+        user_row, agent_row = _grounded_message_rows(session.id)
+        db.add_all([user_row, agent_row])
+        db.commit()
+
+        resp = client.get(f"/v1/sessions/{session.id}/messages")
+        assert resp.status_code == 200
+        messages = resp.json()["messages"]
+
+        legacy, grounded = messages
+        assert legacy["segments"] is None
+        assert legacy["grounding"] is None
+
+        assert grounded["segments"] == (
+            agent_row.metadata_json["grounded_response"]["segments"]
+        )
+        assert grounded["grounding"]["schema"] == "grounded_response_v1"
+        assert "segments" not in grounded["grounding"]
+        assert grounded["citations"][0]["segment_ids"] == ["claim"]
+
+    def test_start_discussion_idempotent_return_includes_segments(
+        self, client, active_session
+    ):
+        session = active_session["session"]
+        db = active_session["db"]
+        user_row, agent_row = _grounded_message_rows(session.id)
+        db.add_all([user_row, agent_row])
+        db.commit()
+
+        resp = client.post(f"/v1/sessions/{session.id}/start-discussion")
+        assert resp.status_code == 200
+        messages = resp.json()["messages"]
+        assert len(messages) == 2
+        assert messages[0]["segments"] is None
+        assert messages[1]["segments"] == (
+            agent_row.metadata_json["grounded_response"]["segments"]
+        )
+        assert messages[1]["grounding"]["metrics"] == {
+            "retained_claim_segments": 1
+        }
