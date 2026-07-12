@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.discussion.grounded_response import (
     GroundedResponseInput,
     parse_grounded_response,
+    project_grounded_message,
     validate_grounded_response,
 )
 
@@ -165,3 +166,40 @@ def test_parser_accepts_json_fence(sample_book):
     value = payload(sample_book["chunks"][0].id, "The morning sun")
     parsed = parse_grounded_response(f"```json\n{json.dumps(value)}\n```")
     assert parsed.segments[0].id == "s1"
+
+
+def test_projection_round_trips_persisted_grounded_metadata():
+    segments = [
+        {"id": "s1", "kind": "interpretation", "text": "Claim", "citation_ids": ["c1"]}
+    ]
+    metadata = {
+        "grounded_response": {
+            "schema": "grounded_response_v1",
+            "repair_attempted": False,
+            "metrics": {"retained_claim_segments": 1},
+            "segments": segments,
+        }
+    }
+
+    projected_segments, grounding = project_grounded_message(metadata)
+
+    assert projected_segments == segments
+    assert grounding == {
+        "schema": "grounded_response_v1",
+        "repair_attempted": False,
+        "metrics": {"retained_claim_segments": 1},
+    }
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        {},
+        {"citation_metrics": {"verified": 2}},
+        {"grounded_response": "not-a-dict"},
+        {"grounded_response": {"segments": []}},
+    ],
+)
+def test_projection_is_none_for_legacy_messages(metadata):
+    assert project_grounded_message(metadata) == (None, None)

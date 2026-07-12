@@ -62,3 +62,6 @@ nul
 .serena/
 vibevoice/
 pytest-of-evela/
+
+# Playwright MCP debris
+.playwright-mcp/

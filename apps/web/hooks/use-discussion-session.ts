@@ -280,6 +280,14 @@ export function useDiscussionSession({
             const provisionalId = messageIds[role];
             const content = String(event.content || "");
             const citations = Array.isArray(event.citations) ? event.citations : null;
+            const segments =
+              Array.isArray(event.segments) && event.segments.length > 0
+                ? event.segments
+                : null;
+            const grounding =
+              event.grounding && typeof event.grounding === "object"
+                ? event.grounding
+                : null;
             // Adopt the server-canonical message_id once the agent's turn
             // finishes, replacing the provisional stream-local id. This
             // makes later merges (feedback, reload, repair) idempotent
@@ -293,7 +301,7 @@ export function useDiscussionSession({
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === provisionalId
-                    ? { ...message, id: serverId, content, citations }
+                    ? { ...message, id: serverId, content, citations, segments, grounding }
                     : message
                 )
               );

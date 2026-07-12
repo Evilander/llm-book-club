@@ -118,6 +118,27 @@ class GroundedValidationResult:
         }
 
 
+def project_grounded_message(
+    metadata_json: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
+    """Project persisted grounded metadata back to the API shape.
+
+    Returns ``(segments, grounding)`` from ``metadata_json.grounded_response``,
+    or ``(None, None)`` for legacy messages that predate grounded segments.
+    """
+    if not isinstance(metadata_json, dict):
+        return None, None
+    grounded = metadata_json.get("grounded_response")
+    if not isinstance(grounded, dict):
+        return None, None
+    segments = grounded.get("segments")
+    grounding = {key: value for key, value in grounded.items() if key != "segments"}
+    return (
+        segments if isinstance(segments, list) and segments else None,
+        grounding or None,
+    )
+
+
 def _strip_json_fence(text: str) -> str:
     stripped = text.strip()
     if not stripped.startswith("```"):

@@ -16,7 +16,8 @@ from ..db import (
     DiscussionMode,
     Section,
 )
-from ..discussion.agents import compute_span_alignment
+from ..discussion.agents import AgentResponse, compute_span_alignment
+from ..discussion.grounded_response import project_grounded_message
 from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
 from ..rate_limit import limiter
@@ -111,10 +112,37 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     citations: list[dict] | None
+    # Grounded-segment projection. None for legacy messages and agents
+    # running the unstructured path.
+    segments: list[dict] | None = None
+    grounding: dict | None = None
 
 
 class DiscussionResponse(BaseModel):
     messages: list[MessageResponse]
+
+
+def _message_response_from_row(message: Message) -> MessageResponse:
+    """Single projection point from a persisted Message row to the API shape."""
+    segments, grounding = project_grounded_message(message.metadata_json)
+    return MessageResponse(
+        role=message.role.value,
+        content=message.content,
+        citations=message.citations,
+        segments=segments,
+        grounding=grounding,
+    )
+
+
+def _message_response_from_agent(response: AgentResponse) -> MessageResponse:
+    """Projection from an in-memory AgentResponse (same shape the engine persists)."""
+    return MessageResponse(
+        role=response.agent_type,
+        content=response.content,
+        citations=DiscussionEngine._serialize_citations(response.citations),
+        segments=response.segments or None,
+        grounding=response.grounding_metadata,
+    )
 
 
 def _resolve_focus_passage(
@@ -366,19 +394,22 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
+    def message_dict(m: Message) -> dict:
+        segments, grounding = project_grounded_message(m.metadata_json)
+        return {
+            "id": m.id,
+            "role": m.role.value,
+            "content": m.content,
+            "citations": m.citations,
+            "segments": segments,
+            "grounding": grounding,
+            "feedback": m.feedback,
+            "created_at": m.created_at.isoformat(),
+        }
+
     return {
         "session_id": session_id,
-        "messages": [
-            {
-                "id": m.id,
-                "role": m.role.value,
-                "content": m.content,
-                "citations": m.citations,
-                "feedback": m.feedback,
-                "created_at": m.created_at.isoformat(),
-            }
-            for m in messages
-        ],
+        "messages": [message_dict(m) for m in messages],
     }
 
 
@@ -434,14 +465,7 @@ async def start_discussion(session_id: str, db: Session = Depends(get_db)):
     )
     if existing:
         return DiscussionResponse(
-            messages=[
-                MessageResponse(
-                    role=m.role.value,
-                    content=m.content,
-                    citations=m.citations,
-                )
-                for m in existing
-            ]
+            messages=[_message_response_from_row(m) for m in existing]
         )
 
     # Get slice data
@@ -463,14 +487,7 @@ async def start_discussion(session_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return DiscussionResponse(
-        messages=[
-            MessageResponse(
-                role=message.role.value,
-                content=message.content,
-                citations=message.citations,
-            )
-            for message in created
-        ]
+        messages=[_message_response_from_row(message) for message in created]
     )
 
 
@@ -518,14 +535,7 @@ async def send_message(
     )
 
     return DiscussionResponse(
-        messages=[
-            MessageResponse(
-                role=r.agent_type,
-                content=r.content,
-                citations=DiscussionEngine._serialize_citations(r.citations),
-            )
-            for r in responses
-        ]
+        messages=[_message_response_from_agent(r) for r in responses]
     )
 
 
@@ -609,11 +619,7 @@ async def challenge_claim(
     engine = DiscussionEngine(db, session, slice_data)
     response = await engine.get_skeptic_response(claim)
 
-    return MessageResponse(
-        role="skeptic",
-        content=response.content,
-        citations=DiscussionEngine._serialize_citations(response.citations),
-    )
+    return _message_response_from_agent(response)
 
 
 @router.post("/sessions/{session_id}/advance-phase")
