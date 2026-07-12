@@ -1,4 +1,6 @@
 """Book ingestion endpoints."""
+from pathlib import Path
+
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -8,6 +10,8 @@ from ..settings import settings
 from ..db import get_db, Book, IngestStatus, Section, DiscussionSession
 from ..worker import enqueue_ingestion
 from ..rate_limit import limiter
+from ..services.media_library import SUPPORTED_DISCUSSION_EXTENSIONS
+from ..services.catalog_index import get_or_seed_catalog
 
 router = APIRouter(tags=["ingest"])
 
@@ -31,7 +35,6 @@ class BookResponse(BaseModel):
     ingest_status: str
     ingest_error: str | None
     created_at: str
-    # Enriched metadata for library browse
     section_count: int = 0
     session_count: int = 0
     last_session_at: str | None = None
@@ -52,54 +55,39 @@ async def ingest_book(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
-    """
-    Upload a PDF or EPUB file to ingest into the system.
-
-    The file will be processed asynchronously:
-    1. Text extraction
-    2. Section detection
-    3. Chunking
-    4. Embedding generation
-    """
-    # Validate file type
+    """Queue a supported publication for extraction and embedding."""
     filename = file.filename or "unknown"
-    if not filename.lower().endswith((".pdf", ".epub", ".txt")):
-        raise HTTPException(400, "Only PDF, EPUB, and TXT files are supported")
+    extension = Path(filename).suffix.lower()
+    if extension not in SUPPORTED_DISCUSSION_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_DISCUSSION_EXTENSIONS))
+        raise HTTPException(400, f"Supported file types: {supported}")
 
     # Stream-read with a running byte cap so a malicious upload cannot exhaust
     # memory before we reject it.
     size_limit = settings.max_upload_mb * 1024 * 1024
-    chunks: list[bytes] = []
-    total = 0
-    chunk_size = 1024 * 1024  # 1 MB reads
+    file_chunks: list[bytes] = []
+    total_bytes = 0
+    chunk_size = 1024 * 1024
     while True:
         chunk = await file.read(chunk_size)
         if not chunk:
             break
-        total += len(chunk)
-        if total > size_limit:
+        total_bytes += len(chunk)
+        if total_bytes > size_limit:
             raise HTTPException(
                 400,
                 f"File too large. Max size: {settings.max_upload_mb}MB",
             )
-        chunks.append(chunk)
-    data = b"".join(chunks)
+        file_chunks.append(chunk)
+    file_data = b"".join(file_chunks)
 
-    # Determine file type
-    lower_name = filename.lower()
-    if lower_name.endswith(".pdf"):
-        file_type = "pdf"
-    elif lower_name.endswith(".epub"):
-        file_type = "epub"
-    else:
-        file_type = "txt"
+    file_type = extension.lstrip(".")
 
-    # Create book record
     book = Book(
-        title=filename.rsplit(".", 1)[0],  # Use filename as initial title
+        title=filename.rsplit(".", 1)[0],
         filename=filename,
         file_type=file_type,
-        file_size_bytes=len(data),
+        file_size_bytes=len(file_data),
         ingest_status=IngestStatus.QUEUED,
         metadata_json={"ingest_source": "upload"},
     )
@@ -107,13 +95,12 @@ async def ingest_book(
     db.commit()
     db.refresh(book)
 
-    # Enqueue ingestion job
-    job_id = enqueue_ingestion(book.id, data, filename)
+    job_id = enqueue_ingestion(book.id, file_data, filename)
 
     return IngestResponse(
         book_id=book.id,
         filename=filename,
-        bytes=len(data),
+        bytes=len(file_data),
         status="queued",
         job_id=job_id,
     )
@@ -164,23 +151,40 @@ def list_books(
 
     # Check audiobook availability
     has_audiobook: dict[str, bool] = {}
-    if settings.audiobooks_dir:
+    audiobook_root = settings.audiobooks_dir or settings.books_dir
+    if audiobook_root:
         try:
             from ..services.media_library import (
+                CATALOG_VERSION,
                 SUPPORTED_AUDIOBOOK_EXTENSIONS,
-                match_audiobooks_for_book,
-                scan_media_dir,
             )
-            audiobook_entries = scan_media_dir(
-                settings.audiobooks_dir,
+            from ..services.audiobooks import (
+                grouped_audiobook_catalog,
+                match_audiobook_groups,
+            )
+            cache_file = (
+                None
+                if settings.app_env == "test"
+                else Path(settings.storage_dir)
+                / "catalog"
+                / f"audiobooks-v{CATALOG_VERSION}.json"
+            )
+            audiobook_catalog = get_or_seed_catalog(
+                db,
+                root_dir=audiobook_root,
+                kind="audiobooks",
                 extensions=SUPPORTED_AUDIOBOOK_EXTENSIONS,
+                index_enabled=settings.media_catalog_index_enabled,
+                cache_file=cache_file,
+                ttl_seconds=settings.library_catalog_ttl,
             )
+            audiobook_groups = grouped_audiobook_catalog(audiobook_catalog)
             for b in books:
                 if b.ingest_status == IngestStatus.COMPLETED:
-                    matches = match_audiobooks_for_book(
+                    matches = match_audiobook_groups(
                         book_title=b.title,
                         book_author=b.author,
-                        audiobook_entries=audiobook_entries,
+                        audiobooks=audiobook_groups,
                     )
                     has_audiobook[b.id] = len(matches) > 0
         except Exception:

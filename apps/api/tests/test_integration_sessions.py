@@ -6,10 +6,10 @@ discussion engine) runs for real.
 """
 import json
 import uuid
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.testclient import TestClient
 
@@ -24,9 +24,6 @@ from app.db.models import (
     DiscussionMode,
     MessageRole,
 )
-from app.providers.llm.base import LLMResponse
-
-
 # ---------------------------------------------------------------------------
 # Fixtures — thread-safe SQLite for TestClient
 # ---------------------------------------------------------------------------
@@ -246,6 +243,55 @@ class TestStartSession:
         assert data["preferences"]["adult_intensity"] == "frank"
         assert data["preferences"]["erotic_focus"] == "glamour"
         assert data["adult_confirmed"] is True
+
+    def test_start_session_verifies_and_focuses_reader_selected_passage(
+        self, client, book_with_chunks
+    ):
+        book = book_with_chunks["book"]
+        section = book_with_chunks["section"]
+        quote = (
+            "Einstein proposed that the laws of physics are the same for all "
+            "non-accelerating observers."
+        )
+
+        resp = client.post(
+            "/v1/sessions/start",
+            json={
+                "book_id": book.id,
+                "mode": "conversation",
+                "focus_passage": {
+                    "quote": quote,
+                    "question": "Why does this sentence change the scale of the argument?",
+                    "chapter": "Chapter 1",
+                    "fraction": 0.18,
+                },
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        focus = data["preferences"]["focus_passage"]
+        assert focus["verified"] is True
+        assert focus["match_type"] == "exact"
+        assert focus["section_id"] == section.id
+        assert focus["chunk_ids"] == [book_with_chunks["chunks"][0].id]
+        assert [item["id"] for item in data["sections"]] == [section.id]
+
+    def test_start_session_rejects_spoofed_focus_quote(self, client, book_with_chunks):
+        book = book_with_chunks["book"]
+        resp = client.post(
+            "/v1/sessions/start",
+            json={
+                "book_id": book.id,
+                "mode": "conversation",
+                "focus_passage": {
+                    "quote": "This fabricated sentence never occurs in the indexed book.",
+                },
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "could not be verified" in resp.json()["detail"]
 
     def test_start_session_rejects_adult_prefs_without_confirmation(
         self, client, book_with_chunks

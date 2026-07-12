@@ -76,6 +76,10 @@ Current core entities in `apps/api/app/db/models.py`:
 - `ReadingUnit`
 - `Note`
 - `Achievement`
+- `ReaderProfile`
+- `PublicationReadingState`
+- `ReaderAnnotation`
+- `AudiobookListeningState`
 
 Relevant enums:
 
@@ -98,6 +102,17 @@ Library endpoints in `apps/api/app/routers/library.py`:
 - `GET /library/local/audiobooks`
 - `POST /library/local/ingest`
 - `GET /books/{book_id}/explore`
+
+Audiobook endpoints in `apps/api/app/routers/audiobooks.py`:
+
+- `GET /audiobooks`
+- `GET /audiobooks/matches`
+- `GET /audiobooks/recent`
+- `GET /audiobooks/{audiobook_id}`
+- `GET /audiobooks/{audiobook_id}/cover`
+- `GET /audiobooks/{audiobook_id}/tracks/{track_id}/stream`
+- `GET /audiobooks/{audiobook_id}/state`
+- `PUT /audiobooks/{audiobook_id}/state`
 
 Session endpoints in `apps/api/app/routers/sessions.py`:
 
@@ -215,7 +230,8 @@ Current environment variables and defaults:
 - `EMBEDDING_CACHE_TTL` - default `3600`
 - `MAX_UPLOAD_MB` - default `200`
 - `BOOKS_DIR`
-- `AUDIOBOOKS_DIR`
+- `AUDIOBOOKS_DIR` - optional separate audio root; supported audio under
+  `BOOKS_DIR` is discovered automatically when this is unset
 - `CORS_ORIGINS` - default `http://localhost:3000`
 - `RATE_LIMIT_DEFAULT` - default `60/minute`
 - `ADMIN_TOKEN` - shared secret for `/v1/admin/*`. When unset, admin is permissive only if `APP_ENV` is `dev`/`development`/`test`/`local`.
@@ -245,12 +261,15 @@ Provider model pins (in `apps/api/app/providers/llm/`):
 
 Routes:
 - `/` - Library home (static, code-split)
+- `/listen` - Local audiobook browser and resumable player (dynamic)
 - `/books/[bookId]` - Session setup (dynamic)
 - `/books/[bookId]/sessions/[sessionId]` - Discussion (dynamic)
 
 The frontend currently supports:
 
 - library browsing with Continue Reading, search, extension filters
+- folder-grouped local audiobook browsing, real embedded covers and metadata,
+  byte-range playback, chapter navigation, speed/sleep controls, and synced resume
 - session setup with mode, style, time budget, reader goal, experience mode, room autonomy
 - reading-slice selection with section previews
 - discussion streaming with multi-agent turns
@@ -273,7 +292,7 @@ Design system:
 Current observed backend test run in this workspace:
 
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest apps/api/tests -q -p no:typeguard`
-- result: `485 passed, 1 warning`
+- result: `529 passed, 1 skipped, 6 warnings`
 
 Observed warning:
 

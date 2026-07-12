@@ -1,9 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
-import { BookShelf } from "@/components/book-shelf";
+import { BookShelf, type ReadableBook } from "@/components/book-shelf";
+
+const DEFAULT_GREETING = {
+  label: "Your reading room",
+  headline: "The shelf has been waiting for you.",
+  body: "Open a book, keep your place, or start the conversation that the page deserves.",
+};
 
 function getTimeOfDayGreeting(): { label: string; headline: string; body: string } {
   const hour = new Date().getHours();
@@ -37,10 +43,27 @@ function getTimeOfDayGreeting(): { label: string; headline: string; body: string
 
 export default function Home() {
   const router = useRouter();
-  const greeting = useMemo(getTimeOfDayGreeting, []);
+  const [greeting, setGreeting] = useState(DEFAULT_GREETING);
+
+  useEffect(() => setGreeting(getTimeOfDayGreeting()), []);
 
   function handleSelectBook(bookId: string) {
     router.push(`/books/${bookId}`);
+  }
+
+  function handleReadBook(book: ReadableBook) {
+    const params = new URLSearchParams({
+      path: book.path,
+      title: book.title_guess,
+      format: book.extension,
+      renderer: book.reader_kind || "foliate",
+      canDiscuss: String(book.can_discuss),
+    });
+    if (book.id) params.set("mediaId", book.id);
+    if (book.author) params.set("author", book.author);
+    if (book.book_id) params.set("bookId", book.book_id);
+    if (book.ingest_status) params.set("ingestStatus", book.ingest_status);
+    router.push(`/read?${params.toString()}`);
   }
 
   return (
@@ -85,7 +108,7 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4, duration: 0.5 }}
         >
-          <BookShelf onSelectBook={handleSelectBook} />
+          <BookShelf onSelectBook={handleSelectBook} onReadBook={handleReadBook} />
         </motion.div>
       </div>
     </div>

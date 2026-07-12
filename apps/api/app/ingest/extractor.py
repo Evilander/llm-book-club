@@ -1,16 +1,19 @@
-"""Extract text and structure from PDF and EPUB files."""
+"""Extract text and structure from supported publication formats."""
 from __future__ import annotations
 import re
 import io
 import tempfile
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Literal
 from pathlib import Path
 
+import mobi
 from pypdf import PdfReader
 from ebooklib import epub
 from bs4 import BeautifulSoup
+from lxml import etree
 
 
 @dataclass
@@ -31,7 +34,7 @@ class ExtractedBook:
     """Result of extracting a book."""
     title: str
     author: str | None
-    file_type: Literal["pdf", "epub", "txt"]
+    file_type: Literal["pdf", "epub", "txt", "fb2", "mobi", "azw", "azw3", "prc"]
     full_text: str
     sections: list[ExtractedSection]
     metadata: dict = field(default_factory=dict)
@@ -42,7 +45,8 @@ CHAPTER_PATTERNS = [
     r"^(Chapter|CHAPTER)\s+(\d+|[IVXLC]+)[\s:.\-]*(.*)$",
     r"^(Part|PART)\s+(\d+|[IVXLC]+)[\s:.\-]*(.*)$",
     r"^(\d+)\.\s+(.+)$",  # "1. Title"
-    r"^(I{1,3}|IV|V|VI{0,3}|IX|X{1,3})[\s:.\-]+(.+)$",  # Roman numerals
+    r"^(I{1,3}|IV|V|VI{0,3}|IX|X{1,3})[.:\-]+\s*(.+)$",
+    r"^(I{1,3}|IV|V|VI{0,3}|IX|X{1,3})$",
 ]
 
 
@@ -57,7 +61,7 @@ def _detect_sections_from_text(text: str, file_type: str) -> list[tuple[int, str
 
     for line in lines:
         stripped = line.strip()
-        if stripped:
+        if stripped and len(stripped) <= 180:
             for pattern in CHAPTER_PATTERNS:
                 match = re.match(pattern, stripped)
                 if match:
@@ -369,9 +373,274 @@ def extract_txt(file_data: bytes, filename: str) -> ExtractedBook:
     )
 
 
+def _xml_local_name(element: etree._Element) -> str:
+    if not isinstance(element.tag, str):
+        return ""
+    return etree.QName(element.tag).localname.lower()
+
+
+def _xml_elements(root: etree._Element, name: str) -> list[etree._Element]:
+    wanted = name.lower()
+    return [element for element in root.iter() if _xml_local_name(element) == wanted]
+
+
+def _xml_text(element: etree._Element | None) -> str | None:
+    if element is None:
+        return None
+    text = re.sub(r"\s+", " ", " ".join(element.itertext())).strip()
+    return text or None
+
+
+def _fb2_author(element: etree._Element) -> str | None:
+    parts: list[str] = []
+    for field_name in ("first-name", "middle-name", "last-name", "nickname"):
+        child = next(
+            (child for child in element if _xml_local_name(child) == field_name),
+            None,
+        )
+        value = _xml_text(child)
+        if value:
+            parts.append(value)
+    return " ".join(parts) or None
+
+
+def extract_fb2(file_data: bytes, filename: str) -> ExtractedBook:
+    """Extract metadata and top-level reading sections from FictionBook XML."""
+    parser = etree.XMLParser(
+        recover=True,
+        resolve_entities=False,
+        no_network=True,
+        huge_tree=False,
+    )
+    root = etree.fromstring(file_data, parser=parser)
+    title_info = next(iter(_xml_elements(root, "title-info")), None)
+    title = (
+        _xml_text(next(iter(_xml_elements(title_info, "book-title")), None))
+        if title_info is not None
+        else None
+    ) or filename.rsplit(".", 1)[0]
+    authors = (
+        [
+            author
+            for author in (
+                _fb2_author(element)
+                for element in _xml_elements(title_info, "author")
+            )
+            if author
+        ]
+        if title_info is not None
+        else []
+    )
+
+    sections: list[ExtractedSection] = []
+    full_text_parts: list[str] = []
+    current_pos = 0
+    for body_index, body in enumerate(_xml_elements(root, "body")):
+        body_sections = [
+            child for child in body if _xml_local_name(child) == "section"
+        ] or [body]
+        body_name = body.get("name")
+        for section in body_sections:
+            title_element = next(
+                (child for child in section if _xml_local_name(child) == "title"),
+                None,
+            )
+            section_title = _xml_text(title_element)
+            lines = [
+                value
+                for value in (
+                    _xml_text(element)
+                    for element in section.iter()
+                    if _xml_local_name(element)
+                    in {"p", "v", "subtitle", "text-author"}
+                )
+                if value
+            ]
+            text = "\n\n".join(lines).strip()
+            if not text:
+                continue
+            char_start = current_pos
+            full_text_parts.extend([text, "\n\n"])
+            current_pos += len(text) + 2
+            sections.append(
+                ExtractedSection(
+                    title=section_title or body_name or f"Section {len(sections) + 1}",
+                    section_type="notes" if body_name == "notes" else "chapter",
+                    order_index=len(sections),
+                    text=text,
+                    char_start=char_start,
+                    char_end=char_start + len(text),
+                )
+            )
+
+    full_text = "".join(full_text_parts)
+    if not sections or not full_text.strip():
+        raise ValueError(f"No readable text found in {filename}")
+
+    language = (
+        _xml_text(next(iter(_xml_elements(title_info, "lang")), None))
+        if title_info is not None
+        else None
+    )
+    return ExtractedBook(
+        title=title,
+        author=", ".join(authors) or None,
+        file_type="fb2",
+        full_text=full_text,
+        sections=sections,
+        metadata={
+            "section_count": len(sections),
+            "language": language,
+            "source_format": "fb2",
+        },
+    )
+
+
+def _unpacked_metadata(directory: Path) -> dict[str, str]:
+    for opf_path in directory.rglob("*.opf"):
+        try:
+            if opf_path.stat().st_size > 4 * 1024 * 1024:
+                continue
+            parser = etree.XMLParser(
+                recover=True,
+                resolve_entities=False,
+                no_network=True,
+                huge_tree=False,
+            )
+            root = etree.fromstring(opf_path.read_bytes(), parser=parser)
+            title = _xml_text(next(iter(_xml_elements(root, "title")), None))
+            creator = _xml_text(next(iter(_xml_elements(root, "creator")), None))
+            return {
+                key: value
+                for key, value in {"title": title, "author": creator}.items()
+                if value
+            }
+        except (OSError, ValueError, etree.XMLSyntaxError):
+            continue
+    return {}
+
+
+def _extract_unpacked_html(
+    html_data: bytes,
+    *,
+    filename: str,
+    file_type: Literal["mobi", "azw", "azw3", "prc"],
+    metadata: dict[str, str],
+) -> ExtractedBook:
+    soup = BeautifulSoup(html_data, "html.parser")
+    for tag in soup(["script", "style", "head"]):
+        tag.decompose()
+    text = soup.get_text(separator="\n", strip=True)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if not text:
+        raise ValueError(f"No readable text found in {filename}")
+
+    detected = _detect_sections_from_text(text, file_type)
+    sections: list[ExtractedSection] = []
+    for index, (char_start, section_title, section_type) in enumerate(detected):
+        char_end = detected[index + 1][0] if index + 1 < len(detected) else len(text)
+        sections.append(
+            ExtractedSection(
+                title=section_title,
+                section_type=section_type,
+                order_index=index,
+                text=text[char_start:char_end],
+                char_start=char_start,
+                char_end=char_end,
+            )
+        )
+    if not sections:
+        sections.append(
+            ExtractedSection(
+                title="Full Text",
+                section_type="book",
+                order_index=0,
+                text=text,
+                char_start=0,
+                char_end=len(text),
+            )
+        )
+
+    return ExtractedBook(
+        title=metadata.get("title") or filename.rsplit(".", 1)[0],
+        author=metadata.get("author"),
+        file_type=file_type,
+        full_text=text,
+        sections=sections,
+        metadata={
+            "section_count": len(sections),
+            "source_format": file_type,
+            "unpacked_format": "html",
+        },
+    )
+
+
+def extract_mobi_family(file_data: bytes, filename: str) -> ExtractedBook:
+    """Unpack a DRM-free Mobipocket/KF8 publication and reuse EPUB/PDF parsing."""
+    file_type = Path(filename).suffix.lower().lstrip(".")
+    if file_type not in {"mobi", "azw", "azw3", "prc"}:
+        raise ValueError(f"Unsupported Kindle-family file: {filename}")
+
+    input_path: str | None = None
+    unpacked_dir: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=f".{file_type}", delete=False
+        ) as temporary:
+            temporary.write(file_data)
+            input_path = temporary.name
+        unpacked_dir, output_path = mobi.extract(input_path)
+        output = Path(output_path)
+        metadata = _unpacked_metadata(Path(unpacked_dir))
+        output_type = output.suffix.lower()
+        if output_type == ".epub":
+            extracted = extract_epub(output.read_bytes(), filename)
+            extracted.title = metadata.get("title") or extracted.title
+            extracted.author = metadata.get("author") or extracted.author
+            extracted.file_type = file_type
+            extracted.metadata = {
+                **extracted.metadata,
+                "source_format": file_type,
+                "unpacked_format": "epub",
+            }
+            return extracted
+        if output_type == ".pdf":
+            extracted = extract_pdf(output.read_bytes(), filename)
+            extracted.title = metadata.get("title") or extracted.title
+            extracted.author = metadata.get("author") or extracted.author
+            extracted.file_type = file_type
+            extracted.metadata = {
+                **extracted.metadata,
+                "source_format": file_type,
+                "unpacked_format": "pdf",
+            }
+            return extracted
+        if output_type in {".html", ".htm"}:
+            return _extract_unpacked_html(
+                output.read_bytes(),
+                filename=filename,
+                file_type=file_type,
+                metadata=metadata,
+            )
+        raise ValueError(f"Kindle unpacker returned unsupported output: {output_type}")
+    except Exception as error:
+        raise ValueError(
+            f"Could not unpack {filename}. Only DRM-free MOBI/AZW/AZW3/PRC files "
+            "can be prepared for discussion."
+        ) from error
+    finally:
+        if input_path:
+            try:
+                os.unlink(input_path)
+            except OSError:
+                pass
+        if unpacked_dir:
+            shutil.rmtree(unpacked_dir, ignore_errors=True)
+
+
 def extract_text(file_data: bytes, filename: str) -> ExtractedBook:
     """
-    Extract text and structure from a PDF, EPUB, or TXT file.
+    Extract text and structure from a supported publication.
 
     Args:
         file_data: Raw file bytes
@@ -387,5 +656,9 @@ def extract_text(file_data: bytes, filename: str) -> ExtractedBook:
         return extract_epub(file_data, filename)
     elif lower_name.endswith(".txt"):
         return extract_txt(file_data, filename)
+    elif lower_name.endswith(".fb2"):
+        return extract_fb2(file_data, filename)
+    elif lower_name.endswith((".mobi", ".azw", ".azw3", ".prc")):
+        return extract_mobi_family(file_data, filename)
     else:
         raise ValueError(f"Unsupported file type: {filename}")

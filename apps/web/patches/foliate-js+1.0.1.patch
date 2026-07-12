@@ -1,0 +1,132 @@
+diff --git a/node_modules/foliate-js/paginator.js b/node_modules/foliate-js/paginator.js
+index 95c4d0d..f1af241 100644
+--- a/node_modules/foliate-js/paginator.js
++++ b/node_modules/foliate-js/paginator.js
+@@ -84,6 +84,7 @@ const getBoundingClientRect = target => {
+ }
+ 
+ const getVisibleRange = (doc, start, end, mapRect) => {
++    if (!doc?.body) return null
+     // first get all visible nodes
+     const acceptNode = node => {
+         const name = node.localName?.toLowerCase()
+@@ -193,12 +194,16 @@ const makeMarginals = (length, part) => Array.from({ length }, () => {
+ })
+ 
+ const setStylesImportant = (el, styles) => {
++    if (!el) return
+     const { style } = el
+     for (const [k, v] of Object.entries(styles)) style.setProperty(k, v, 'important')
+ }
+ 
+ class View {
+-    #observer = new ResizeObserver(() => this.expand())
++    #destroyed = false
++    #observer = new ResizeObserver(() => {
++        if (!this.#destroyed) this.expand()
++    })
+     #element = document.createElement('div')
+     #iframe = document.createElement('iframe')
+     #contentRange = document.createRange()
+@@ -275,7 +280,8 @@ class View {
+         })
+     }
+     render(layout) {
+-        if (!layout || !this.document) return
++        if (this.#destroyed || !layout
++            || !this.document?.documentElement || !this.document?.body) return
+         this.#column = layout.flow !== 'scrolled'
+         this.#layout = layout
+         if (this.#column) this.columnize(layout)
+@@ -352,7 +358,9 @@ class View {
+         }
+     }
+     expand() {
+-        const { documentElement } = this.document
++        if (this.#destroyed) return
++        const documentElement = this.document?.documentElement
++        if (!documentElement) return
+         if (this.#column) {
+             const side = this.#vertical ? 'height' : 'width'
+             const otherSide = this.#vertical ? 'width' : 'height'
+@@ -408,7 +416,8 @@ class View {
+         return this.#overlayer
+     }
+     destroy() {
+-        if (this.document) this.#observer.unobserve(this.document.body)
++        this.#destroyed = true
++        this.#observer.disconnect()
+     }
+ }
+ 
+@@ -419,7 +428,10 @@ export class Paginator extends HTMLElement {
+         'max-inline-size', 'max-block-size', 'max-column-count',
+     ]
+     #root = this.attachShadow({ mode: 'closed' })
+-    #observer = new ResizeObserver(() => this.render())
++    #destroyed = false
++    #observer = new ResizeObserver(() => {
++        if (!this.#destroyed) this.render()
++    })
+     #top
+     #background
+     #container
+@@ -770,7 +782,7 @@ export class Paginator extends HTMLElement {
+         return { height, width, margin, gap, columnWidth }
+     }
+     render() {
+-        if (!this.#view) return
++        if (this.#destroyed || !this.#view?.document?.body) return
+         this.#view.render(this.#beforeRender({
+             vertical: this.#vertical,
+             rtl: this.#rtl,
+@@ -978,14 +990,17 @@ export class Paginator extends HTMLElement {
+         await this.#scrollToPage(newPage + 1, reason)
+     }
+     #getVisibleRange() {
+-        if (this.scrolled) return getVisibleRange(this.#view.document,
++        const doc = this.#view?.document
++        if (!doc?.body) return null
++        if (this.scrolled) return getVisibleRange(doc,
+             this.start + this.#margin, this.end - this.#margin, this.#getRectMapper())
+         const size = this.#rtl ? -this.size : this.size
+-        return getVisibleRange(this.#view.document,
++        return getVisibleRange(doc,
+             this.start - size, this.end - size, this.#getRectMapper())
+     }
+     #afterScroll(reason) {
+         const range = this.#getVisibleRange()
++        if (!range) return
+         this.#lastVisibleRange = range
+         // don't set new anchor if relocation was to scroll to anchor
+         if (reason !== 'selection' && reason !== 'navigation' && reason !== 'anchor')
+@@ -1145,20 +1160,23 @@ export class Paginator extends HTMLElement {
+ 
+         // NOTE: needs `requestAnimationFrame` in Chromium
+         requestAnimationFrame(() => {
+-            this.#replaceBackground(this.#view.docBackground, this.columnCount)
++            const view = this.#view
++            if (view) this.#replaceBackground(view.docBackground, this.columnCount)
+         })
+ 
+         // needed because the resize observer doesn't work in Firefox
+-        this.#view?.document?.fonts?.ready?.then(() => this.#view.expand())
++        this.#view?.document?.fonts?.ready?.then(() => this.#view?.expand())
+     }
+     focusView() {
+-        this.#view.document.defaultView.focus()
++        this.#view?.document?.defaultView?.focus()
+     }
+     destroy() {
+-        this.#observer.unobserve(this)
+-        this.#view.destroy()
++        if (this.#destroyed) return
++        this.#destroyed = true
++        this.#observer.disconnect()
++        this.#view?.destroy()
+         this.#view = null
+-        this.sections[this.#index]?.unload?.()
++        this.sections?.[this.#index]?.unload?.()
+         this.#mediaQuery.removeEventListener('change', this.#mediaQueryListener)
+     }
+ }

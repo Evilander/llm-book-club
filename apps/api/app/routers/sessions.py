@@ -7,7 +7,16 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..db import get_db, Book, DiscussionSession, Message, DiscussionMode, MessageRole
+from ..db import (
+    get_db,
+    Book,
+    Chunk,
+    DiscussionSession,
+    Message,
+    DiscussionMode,
+    Section,
+)
+from ..discussion.agents import compute_span_alignment
 from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
 from ..rate_limit import limiter
@@ -32,6 +41,14 @@ def _preferences_require_adult(prefs: dict) -> bool:
 router = APIRouter(tags=["sessions"])
 
 
+class FocusPassageRequest(BaseModel):
+    quote: str = Field(..., min_length=8, max_length=4000)
+    question: str | None = Field(None, max_length=1000)
+    chapter: str | None = Field(None, max_length=500)
+    page: str | None = Field(None, max_length=200)
+    fraction: float | None = Field(None, ge=0, le=1)
+
+
 class StartSessionRequest(BaseModel):
     book_id: str
     mode: str = "guided"  # guided|socratic|poetry|nonfiction
@@ -46,6 +63,7 @@ class StartSessionRequest(BaseModel):
     desire_lens: str | None = None
     adult_intensity: str | None = None
     erotic_focus: str | None = None
+    focus_passage: FocusPassageRequest | None = None
     # Required when any adult preference is set. Sending adult preferences
     # with adult_confirmed=False fails the request with 400. Sending
     # adult_confirmed=True without any adult preference is benign (stored
@@ -99,6 +117,63 @@ class DiscussionResponse(BaseModel):
     messages: list[MessageResponse]
 
 
+def _resolve_focus_passage(
+    db: Session,
+    *,
+    book_id: str,
+    focus: FocusPassageRequest,
+) -> dict:
+    """Align a reader-selected quote to canonical chunks before prompt use."""
+    chunks = (
+        db.query(Chunk)
+        .join(Section, Section.id == Chunk.section_id)
+        .filter(Chunk.book_id == book_id)
+        .order_by(Section.order_index, Chunk.order_index)
+        .all()
+    )
+    quote = focus.quote.strip()
+    for chunk in chunks:
+        alignment = compute_span_alignment(chunk.text or "", quote)
+        if alignment:
+            start, end, match_type = alignment
+            return {
+                **focus.model_dump(),
+                "quote": chunk.text[start:end],
+                "verified": True,
+                "match_type": match_type,
+                "section_id": str(chunk.section_id),
+                "chunk_ids": [str(chunk.id)],
+            }
+
+    chunks_by_section: dict[str, list[Chunk]] = {}
+    for chunk in chunks:
+        chunks_by_section.setdefault(str(chunk.section_id), []).append(chunk)
+    for section_id, section_chunks in chunks_by_section.items():
+        for start_index in range(len(section_chunks)):
+            group: list[Chunk] = []
+            combined = ""
+            for chunk in section_chunks[start_index : start_index + 4]:
+                group.append(chunk)
+                combined = f"{combined}\n{chunk.text or ''}".strip()
+                alignment = compute_span_alignment(combined, quote)
+                if alignment:
+                    return {
+                        **focus.model_dump(),
+                        "verified": True,
+                        "match_type": alignment[2],
+                        "section_id": section_id,
+                        "chunk_ids": [str(item.id) for item in group],
+                    }
+                if len(combined) > max(12_000, len(quote) * 3):
+                    break
+
+    raise HTTPException(
+        400,
+        "The selected passage could not be verified against the indexed book text. "
+        "Try selecting a slightly shorter passage after preparation finishes.",
+    )
+
+
 @router.post("/sessions/start", response_model=SessionResponse)
 @limiter.limit("5/minute")
 def start_session(request: Request, req: StartSessionRequest, db: Session = Depends(get_db)):
@@ -120,6 +195,18 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
     except ValueError:
         raise HTTPException(400, f"Invalid mode: {req.mode}")
 
+    focus_passage = None
+    effective_section_ids = list(req.section_ids or [])
+    if req.focus_passage:
+        focus_passage = _resolve_focus_passage(
+            db,
+            book_id=req.book_id,
+            focus=req.focus_passage,
+        )
+        focus_section_id = focus_passage["section_id"]
+        if focus_section_id not in effective_section_ids:
+            effective_section_ids.insert(0, focus_section_id)
+
     # Select reading slice
     try:
         slice_data = select_session_slice(
@@ -127,7 +214,7 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
             book_id=req.book_id,
             time_budget_min=req.time_budget_min,
             start_section_id=req.start_section_id,
-            section_ids=req.section_ids,
+            section_ids=effective_section_ids or None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -141,6 +228,7 @@ def start_session(request: Request, req: StartSessionRequest, db: Session = Depe
         "desire_lens": req.desire_lens,
         "adult_intensity": req.adult_intensity,
         "erotic_focus": req.erotic_focus,
+        "focus_passage": focus_passage,
     }
 
     # Server-side 18+ gate: adult preferences cannot be set without explicit
@@ -367,15 +455,21 @@ async def start_discussion(session_id: str, db: Session = Depends(get_db)):
     engine = DiscussionEngine(db, session, slice_data)
 
     # Generate opening
-    response = await engine.start_discussion()
-
+    await engine.start_discussion()
+    created = (
+        db.query(Message)
+        .filter(Message.session_id == session_id)
+        .order_by(Message.created_at)
+        .all()
+    )
     return DiscussionResponse(
         messages=[
             MessageResponse(
-                role="facilitator",
-                content=response.content,
-                citations=DiscussionEngine._serialize_citations(response.citations),
+                role=message.role.value,
+                content=message.content,
+                citations=message.citations,
             )
+            for message in created
         ]
     )
 

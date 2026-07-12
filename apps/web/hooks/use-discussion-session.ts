@@ -118,10 +118,13 @@ export function useDiscussionSession({
               created_at: message.created_at || new Date().toISOString(),
             }))
           );
-          if (sessionData.preferences?.experience_mode === "audio" && data.messages[0]?.content) {
+          const firstAgentMessage = data.messages.find(
+            (message: Message) => message.role !== "user",
+          );
+          if (sessionData.preferences?.experience_mode === "audio" && firstAgentMessage?.content) {
             onSentenceReadyRef.current({
-              sentence: data.messages[0].content,
-              role: data.messages[0].role || "facilitator",
+              sentence: firstAgentMessage.content,
+              role: firstAgentMessage.role || "facilitator",
               voice: "nova",
             });
           }

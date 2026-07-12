@@ -1,7 +1,7 @@
 # Step 2: Start Docker Desktop and launch the app
 # Run this after restart.
 
-$projectDir = "B:\ai\llm-book"
+$projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 # --- Start Docker Desktop if not running ---
 $dockerProcess = Get-Process "Docker Desktop" -ErrorAction SilentlyContinue
@@ -35,6 +35,19 @@ if ($elapsed -ge $maxWait) {
 Write-Host ""
 Write-Host "Starting LLM Book Club stack..." -ForegroundColor Cyan
 Set-Location $projectDir
+
+# Create local configuration without overwriting any existing keys.
+if (-not (Test-Path (Join-Path $projectDir ".env"))) {
+    Copy-Item (Join-Path $projectDir ".env.example") (Join-Path $projectDir ".env")
+    Write-Host "Configured D:\books as the local library mount." -ForegroundColor Green
+}
+if (-not (Test-Path (Join-Path $projectDir "apps\api\.env"))) {
+    Copy-Item (Join-Path $projectDir "apps\api\.env.example") (Join-Path $projectDir "apps\api\.env")
+    Write-Host "Created apps\api\.env — add an API key there when you want AI discussion." -ForegroundColor Yellow
+}
+if (-not (Test-Path (Join-Path $projectDir "apps\web\.env.local"))) {
+    Copy-Item (Join-Path $projectDir "apps\web\.env.local.example") (Join-Path $projectDir "apps\web\.env.local")
+}
 
 # Only start the infra + backend services (skip vibevoice/ollama which need GPU)
 docker compose up -d db redis

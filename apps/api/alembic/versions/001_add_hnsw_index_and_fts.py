@@ -18,13 +18,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Add HNSW index on chunks.embedding for fast approximate nearest-neighbor search.
-    #    vector_cosine_ops matches the cosine distance used in retrieval.
-    #    m=16 and ef_construction=64 are solid defaults for recall/build-speed tradeoff.
+    # 1. Index a half-precision expression because pgvector's HNSW vector
+    #    operator class supports at most 2,000 dimensions while this schema
+    #    stores 3,072-dimensional embeddings. The full-precision source column
+    #    remains unchanged.
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
-        ON chunks USING hnsw (embedding vector_cosine_ops)
+        ON chunks USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
         WITH (m = 16, ef_construction = 64)
         """
     )

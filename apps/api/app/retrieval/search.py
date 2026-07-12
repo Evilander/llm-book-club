@@ -1,7 +1,6 @@
 """Hybrid search over book chunks: pgvector + PostgreSQL FTS + Reciprocal Rank Fusion + optional reranking."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -10,11 +9,16 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from ..db import Chunk, Section
+from ..db import Chunk
 from ..providers.embeddings.factory import get_embeddings_client
 from .cache import get_embedding_cache
 
 logger = logging.getLogger(__name__)
+
+VECTOR_DISTANCE_SQL = (
+    "CAST(c.embedding AS halfvec(3072)) "
+    "<=> CAST(:embedding_vec AS halfvec(3072))"
+)
 
 # ---------------------------------------------------------------------------
 # Reranker import (graceful fallback when provider not installed)
@@ -72,7 +76,14 @@ async def vector_search(
 
     embedding_str = "[{}]".format(",".join(str(x) for x in query_embedding))
 
-    sql = """
+    # pgvector 0.8+ can continue scanning an approximate index after a book or
+    # section filter removes early candidates. set_config is harmless on older
+    # extension versions and stays local to the current transaction.
+    db.execute(
+        text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+    )
+
+    sql = f"""
         SELECT
             c.id        AS chunk_id,
             c.section_id,
@@ -81,7 +92,7 @@ async def vector_search(
             c.char_start,
             c.char_end,
             c.source_ref,
-            1 - (c.embedding <=> :embedding_vec ::vector) AS score
+            1 - ({VECTOR_DISTANCE_SQL}) AS score
         FROM chunks c
         JOIN sections s ON c.section_id = s.id
         WHERE c.book_id = :book_id
@@ -91,7 +102,7 @@ async def vector_search(
     if section_ids:
         sql += "  AND c.section_id = ANY(:section_ids)\n"
 
-    sql += " ORDER BY c.embedding <=> :embedding_vec ::vector\n LIMIT :limit"
+    sql += f" ORDER BY {VECTOR_DISTANCE_SQL}\n LIMIT :limit"
 
     params: dict = {
         "book_id": book_id,

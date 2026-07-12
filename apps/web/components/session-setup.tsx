@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   ArrowLeft,
   BookOpen,
@@ -12,12 +13,18 @@ import {
   Quote,
   Sparkles,
   Wand2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { API_BASE, cn, formatReadingTime } from "@/lib/utils";
+import {
+  clearDiscussionFocus,
+  loadDiscussionFocus,
+  type DiscussionFocus,
+} from "@/lib/discussion-focus";
 import type { ExplorePayload } from "@/types/api";
 
 interface SessionSetupProps {
@@ -283,6 +290,7 @@ function buildStarterQuestions({
 
 export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupProps) {
   const [explore, setExplore] = useState<ExplorePayload | null>(null);
+  const [focusPassage, setFocusPassage] = useState<DiscussionFocus | null>(null);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [selectedMode, setSelectedMode] = useState("conversation");
@@ -298,6 +306,15 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
   const [timeBudget, setTimeBudget] = useState(20);
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
   const [previewSectionId, setPreviewSectionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const focus = loadDiscussionFocus(bookId);
+    if (!focus) return;
+    setFocusPassage(focus);
+    setSelectedMode("deep_dive");
+    setReaderGoal("Understand difficult passages");
+    setExperienceMode("text");
+  }, [bookId]);
 
   useEffect(() => {
     async function loadExplore(sectionId?: string | null) {
@@ -364,6 +381,15 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
           adult_intensity: selectedStyle === "sexy" ? adultIntensity : null,
           erotic_focus: selectedStyle === "sexy" ? eroticFocus : null,
           adult_confirmed: selectedStyle === "sexy" ? adultConfirmed : false,
+          focus_passage: focusPassage
+            ? {
+                quote: focusPassage.quote,
+                question: focusPassage.question || null,
+                chapter: focusPassage.chapter || null,
+                page: focusPassage.page || null,
+                fraction: focusPassage.fraction,
+              }
+            : null,
         }),
       });
       if (!res.ok) {
@@ -375,6 +401,7 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
       }
       const data = await res.json();
       if (data.session_id) {
+        clearDiscussionFocus(bookId);
         toast.success(selectedStyle === "sexy" ? "After-dark room opening..." : "Opening your reading room...");
         onStartSession(data.session_id);
       }
@@ -427,6 +454,39 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
           </p>
         </div>
       </div>
+
+      {focusPassage && (
+        <Card
+          data-testid="discussion-focus-card"
+          className="overflow-hidden border-teal-400/25 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_45%),rgba(10,15,15,0.88)]"
+        >
+          <CardContent className="relative p-5">
+            <button
+              type="button"
+              aria-label="Remove selected passage"
+              className="absolute right-4 top-4 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => {
+                clearDiscussionFocus(bookId);
+                setFocusPassage(null);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-teal-300/80">
+              <Quote className="h-3.5 w-3.5" /> From your margin
+            </div>
+            <blockquote className="mt-3 max-w-3xl border-l-2 border-teal-400/50 pl-4 font-serif text-sm italic leading-7 text-foreground/85">
+              “{focusPassage.quote}”
+            </blockquote>
+            {focusPassage.question && (
+              <p className="mt-3 text-sm text-teal-100/75">{focusPassage.question}</p>
+            )}
+            <p className="mt-3 text-xs text-muted-foreground">
+              The server will verify this wording against the indexed book and focus the room on its canonical section.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card glass className="overflow-hidden">
         <CardContent className="p-0">
@@ -512,8 +572,19 @@ export function SessionSetup({ bookId, onBack, onStartSession }: SessionSetupPro
                     {topAudiobook.match_reason || "Strong local match"}
                   </p>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    {topAudiobook.parent_folder || topAudiobook.filename}
+                    {topAudiobook.track_count} {topAudiobook.track_count === 1 ? "track" : "tracks"}
+                    {` · ${topAudiobook.parent_folder || topAudiobook.filename}`}
                   </p>
+                  <Button variant="outline" size="sm" asChild className="mt-4 w-full">
+                    <Link
+                      href={`/listen?${new URLSearchParams({
+                        audioId: topAudiobook.id,
+                        returnTo: `/books/${bookId}`,
+                      })}`}
+                    >
+                      <Play className="mr-2 h-3.5 w-3.5" /> Open the listening room
+                    </Link>
+                  </Button>
                 </div>
               ) : (
                 <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-black/10 p-4 text-sm text-muted-foreground">

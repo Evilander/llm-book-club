@@ -8,7 +8,36 @@ Built for local-first reading workflows, the app combines fast ingestion, hybrid
 
 - Multi-agent discussion with three distinct AI voices:
   Sam is the enthusiastic guide, Ellis is the close reader, and Kit is the devil's advocate.
-- Upload or browse local PDF, EPUB, and TXT books from your filesystem.
+- Upload or browse local PDF, EPUB, TXT, FB2, MOBI, AZW/AZW3, and PRC books
+  from your filesystem.
+- Read EPUB, MOBI/AZW/AZW3/PRC, FB2, CBZ, PDF, and TXT files immediately,
+  without waiting for embeddings or an LLM.
+- A durable local catalog makes search across tens of thousands of files fast
+  after the first scan, with explicit format filters and one-click refresh.
+- Embedded titles, authors, and real covers are extracted lazily from EPUB,
+  Kindle, FB2, CBZ, and PDF files, then cached instead of slowing the catalog scan.
+- The reading room remembers position, typography, theme, and private margin
+  notes in the browser, with the grounded discussion room always one step away.
+- Find text across an entire EPUB/Kindle/FB2, PDF, or TXT publication with
+  format-native navigation. Highlights keep exact EPUB CFIs or TXT offsets,
+  bookmarks retain their page/location, and all marks can be exported as Markdown.
+- Reading positions, typography, highlights, notes, and bookmarks sync through a
+  server-backed local profile. Browser storage remains an offline cache, and
+  deletion tombstones prevent an older browser from resurrecting removed marks.
+- Local MP3, M4B, M4A, AAC, FLAC, OGG, and WAV files are grouped into
+  folder-level audiobooks with real tag/duration metadata, byte-range playback,
+  chapter navigation, speed controls, sleep timers, and cross-browser resume.
+  Audio stored beside ebooks is discovered automatically; `AUDIOBOOKS_DIR` can
+  point at a separate collection instead.
+- A visual Continue Reading shelf restores the last position in recently opened
+  local books; the library can be arranged alphabetically or by recent changes.
+- Select a passage in the reader and carry it into a close-reading room with a
+  question; the server verifies the quote against canonical chunks and focuses
+  the session on the matching section before any agent sees it.
+- Grounded preparation now covers every textual reader format. DRM-free
+  Kindle-family files are unpacked in the worker; local paths are queued by
+  reference so large books are not copied into Redis. Image-only CBZ files
+  remain readable but need OCR or a multimodal evidence path for discussion.
 - Open the active reading slice in a built-in reader panel while the discussion is running.
 - Switch between text mode and conversational audio mode with streaming TTS playback.
 - Pair an ingested ebook with likely local audiobook matches from a configured audiobook folder.
@@ -31,6 +60,7 @@ Built for local-first reading workflows, the app combines fast ingestion, hybrid
 ### 1. Copy environment files
 
 ```bash
+cp .env.example .env
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.local.example apps/web/.env.local
 ```
@@ -38,9 +68,13 @@ cp apps/web/.env.local.example apps/web/.env.local
 PowerShell:
 
 ```powershell
+Copy-Item .env.example .env
 Copy-Item apps/api/.env.example apps/api/.env
 Copy-Item apps/web/.env.local.example apps/web/.env.local
 ```
+
+The checked-in root example maps `D:/books` into the containers. Change
+`HOST_BOOKS_DIR` in `.env` if your collection lives elsewhere.
 
 ### 2. Add your API key
 
@@ -118,7 +152,15 @@ Most settings live in `apps/api/.env`.
 - `TTS_BASE_URL`: OpenAI-compatible TTS endpoint. For the bundled VibeVoice service, use `http://localhost:8880/v1`.
 - `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `TTS_MODEL`: TTS settings.
 - `BOOKS_DIR`: local directory exposed for filesystem book browsing.
-- `AUDIOBOOKS_DIR`: optional local audiobook directory used for matching likely companion audio files.
+- `HOST_BOOKS_DIR` (root `.env`): host directory mounted read-only at
+  `BOOKS_DIR` by Docker Compose. Defaults to `D:/books` in the example.
+- `STORAGE_DIR`, `LIBRARY_CATALOG_TTL`: location and freshness window for the
+  derived local-library catalog and lazily generated cover assets. The default
+  catalog TTL is 24 hours; the shelf also has an explicit refresh action.
+- `READER_PROFILE_ID`: server-owned profile key for synced positions and marks.
+  It defaults to `local`; choose a stable value per personal deployment.
+- `AUDIOBOOKS_DIR`: optional separate audiobook directory. When unset, the app
+  discovers supported audio formats under `BOOKS_DIR`.
 - `DATABASE_URL`, `REDIS_URL`: infrastructure connections.
 - `CORS_ORIGINS`, `MAX_UPLOAD_MB`: app-level behavior.
 - `ADMIN_TOKEN`: shared-secret token required on the `X-Admin-Token` header for `/v1/admin/*` endpoints. When unset, admin endpoints are permissive only when `APP_ENV` is `dev`, `development`, `test`, or `local`; any other environment refuses admin requests until this is set.
@@ -129,6 +171,17 @@ Most settings live in `apps/api/.env`.
 - **Admin endpoints.** `/v1/admin/*` are gated by `ADMIN_TOKEN` in any non-local environment. Set it before deploying anywhere reachable from the public internet.
 - **Postgres / Redis binding.** The default `docker-compose.yml` binds the database and redis ports to `127.0.0.1` only. If you deploy this compose file to a VPS, leave that binding in place (or remove the `ports` block entirely and use Docker-network DNS).
 - **Upload size.** Uploads are streamed and capped to `MAX_UPLOAD_MB` without being buffered first — oversized requests are rejected before consuming memory.
+- **Untrusted publications.** The reading route uses a nonce-based Content
+  Security Policy. EPUB-family markup is additionally stripped of scripts,
+  event handlers, frames, and embedded objects before rendering; external
+  publication network requests are blocked.
+- **Selected-passage grounding.** Reader selections are not trusted merely
+  because they came from the browser. Session creation requires an exact or
+  normalized alignment to canonical indexed chunks, and quoted publication
+  text is explicitly labeled as evidence rather than instructions in prompts.
+- **Kindle DRM.** MOBI/AZW/AZW3/PRC discussion preparation works only for
+  unencrypted files. The reader and ingestion pipeline do not remove or bypass
+  DRM; failed extractions remain readable and expose a retry action.
 
 ## Model defaults
 

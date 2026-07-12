@@ -23,6 +23,12 @@ from .models import (
     QuizResult,
     UserProgress,
     DailyActivity,
+    ReaderProfile,
+    PublicationReadingState,
+    ReaderAnnotation,
+    AudiobookListeningState,
+    LocalMediaCatalog,
+    LocalMediaCatalogItem,
 )
 
 __all__ = [
@@ -52,4 +58,10 @@ __all__ = [
     "QuizResult",
     "UserProgress",
     "DailyActivity",
+    "ReaderProfile",
+    "PublicationReadingState",
+    "ReaderAnnotation",
+    "AudiobookListeningState",
+    "LocalMediaCatalog",
+    "LocalMediaCatalogItem",
 ]
