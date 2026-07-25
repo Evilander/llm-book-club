@@ -65,3 +65,16 @@ pytest-of-evela/
 
 # Playwright MCP debris
 .playwright-mcp/
+
+# Private working material: agent instructions, planning docs, session notes.
+# These are working files, not documentation anyone else should have to read.
+CLAUDE.md
+AGENTS.md
+codex.md
+HANDOFF.md
+.claude/
+.codex/
+.agents/
+notes/
+todos/
+docs/superpowers/
