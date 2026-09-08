@@ -1,0 +1,96 @@
+# Dependencies
+node_modules
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.production
+.env.*
+!.env.example
+!.env.*.example
+apps/api/.env
+apps/web/.env.local
+
+# Build outputs
+.next/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+*.egg
+.eggs/
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Storage / data
+storage/
+*.sqlite3
+*.sqlite
+*.db
+book_storage/
+/books/*
+!/books/.gitkeep
+
+# Docker volumes
+db_data/
+ollama_data/
+
+# Logs
+*.log
+logs/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Misc
+nul
+*.bak
+.claude/
+.serena/
+vibevoice/
+pytest-of-*/
+.playwright-mcp/
+
+# Private key material
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private working material: agent instructions, planning docs, session notes.
+# These are working files, not documentation anyone else should have to read.
+CLAUDE.md
+AGENTS.md
+codex.md
+HANDOFF.md
+*HANDOFF*.md
+*_handoff*.md
+.claude/
+.codex/
+.agents/
+notes/
+todos/
+docs/superpowers/
+
+# Local workstation maintenance and design-generation scripts
+/scripts/

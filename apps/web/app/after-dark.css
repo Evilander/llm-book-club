@@ -1,0 +1,594 @@
+/* ============================================================
+   AFTER-DARK PORTAL
+   ============================================================ */
+
+  /* Ink palette additions */
+  :root {
+    --ink-lucian: #4a1f4a;
+    --ink-vesper: #6b2a5c;
+  }
+
+  .ad-shell {
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+    color: var(--cream);
+    font-family: var(--font-body), Georgia, serif;
+    font-size: 17px;
+    line-height: 1.55;
+    background:
+      radial-gradient(circle at 86% 8%, rgba(247, 201, 122, 0.22), transparent 42%),
+      radial-gradient(circle at 8% 92%, rgba(91, 26, 42, 0.45), transparent 48%),
+      radial-gradient(circle at 50% 50%, rgba(42, 14, 16, 0.6), rgba(20, 12, 12, 0.95) 75%),
+      #1a0d0e;
+  }
+  .ad-shell::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image:
+      radial-gradient(1px 1px at 12% 24%, rgba(155, 123, 79, 0.45), transparent),
+      radial-gradient(1px 1px at 78% 16%, rgba(155, 123, 79, 0.35), transparent),
+      radial-gradient(1px 1px at 34% 78%, rgba(155, 123, 79, 0.5), transparent),
+      radial-gradient(1px 1px at 64% 62%, rgba(155, 123, 79, 0.3), transparent),
+      radial-gradient(1px 1px at 22% 90%, rgba(155, 123, 79, 0.4), transparent),
+      radial-gradient(1px 1px at 90% 84%, rgba(155, 123, 79, 0.35), transparent),
+      radial-gradient(1px 1px at 48% 38%, rgba(155, 123, 79, 0.25), transparent);
+  }
+
+  .ad-room {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 56px 40px;
+    position: relative;
+  }
+
+  /* Age gate */
+  .ad-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 45%, #2a1416 0%, #100808 80%);
+    text-align: center;
+    padding: 24px;
+    transition: opacity 0.4s ease;
+  }
+  .ad-gate-inner { max-width: 520px; }
+  .ad-gate-pre {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--foxed);
+    text-transform: uppercase;
+    margin-bottom: 36px;
+  }
+  .ad-gate-line {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 28px;
+    color: var(--cream);
+    line-height: 1.35;
+    margin-bottom: 14px;
+  }
+  .ad-gate-sub {
+    font-family: var(--font-body), Georgia, serif;
+    font-size: 15px;
+    color: var(--foxed);
+    font-style: italic;
+    margin-bottom: 48px;
+  }
+  .ad-seal {
+    width: 148px;
+    height: 148px;
+    margin: 0 auto;
+    position: relative;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+    display: block;
+  }
+  .ad-seal-disc {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #d6a85a 0%, var(--brass) 45%, #8a6a2f 100%);
+    box-shadow:
+      0 0 0 2px rgba(196, 154, 74, 0.25),
+      0 0 38px rgba(247, 201, 122, 0.35),
+      inset 0 -8px 18px rgba(0, 0, 0, 0.4);
+    position: relative;
+    transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .ad-seal-disc::before {
+    content: "L";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-size: 62px;
+    color: #2a1408;
+    text-shadow: 0 1px 0 rgba(247, 201, 122, 0.4);
+  }
+  .ad-seal:hover .ad-seal-disc { transform: scale(1.04); }
+  .ad-seal-half {
+    position: absolute;
+    top: 0;
+    width: 50%;
+    height: 100%;
+    overflow: hidden;
+    transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .ad-seal-half.ad-seal-l { left: 0; }
+  .ad-seal-half.ad-seal-r { right: 0; }
+  .ad-seal-half .ad-seal-disc { position: absolute; width: 200%; height: 100%; left: 0; }
+  .ad-seal-half.ad-seal-r .ad-seal-disc { left: -100%; }
+  .ad-gate-cracked .ad-seal-half.ad-seal-l { transform: translateX(-22px) rotate(-8deg); }
+  .ad-gate-cracked .ad-seal-half.ad-seal-r { transform: translateX(22px) rotate(8deg); }
+  .ad-gate-cracked { opacity: 0; pointer-events: none; }
+  .ad-gate-foot {
+    margin-top: 32px;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--foxed);
+    text-transform: uppercase;
+  }
+
+  /* Top bar */
+  .ad-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    color: var(--foxed);
+    text-transform: uppercase;
+    margin-bottom: 72px;
+  }
+  .ad-topbar-leave {
+    background: transparent;
+    border: 0;
+    color: var(--foxed);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(155, 123, 79, 0.4);
+    padding-bottom: 1px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+  .ad-topbar-leave:hover { color: var(--cream); border-bottom-color: var(--cream); }
+
+  /* Hero */
+  .ad-hero {
+    position: relative;
+    padding: 24px 0 96px;
+    max-width: 780px;
+  }
+  .ad-hero h1 {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 62px;
+    line-height: 1.05;
+    color: #e8d9b2;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .ad-hero-b {
+    display: block;
+    color: var(--cream);
+    font-size: 46px;
+    margin-top: 8px;
+    padding-left: 80px;
+  }
+  .ad-hero-status {
+    margin-top: 42px;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    color: var(--brass);
+    text-transform: uppercase;
+  }
+  .ad-hero-rule {
+    display: inline-block;
+    width: 48px;
+    height: 1px;
+    background: var(--brass);
+    vertical-align: middle;
+    margin: 0 14px 3px 0;
+  }
+
+  /* Cast */
+  .ad-cast {
+    position: relative;
+    padding: 48px 0 120px;
+    margin-top: 8px;
+    border-top: 1px solid rgba(155, 123, 79, 0.18);
+  }
+  .ad-cast-label {
+    position: absolute;
+    top: 24px;
+    left: 0;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: var(--foxed);
+    text-transform: uppercase;
+  }
+  .ad-cast-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 36px;
+    padding-top: 64px;
+    align-items: flex-start;
+  }
+  .ad-player {
+    flex: 0 1 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+  }
+  .ad-wax {
+    width: 78px;
+    height: 78px;
+    border-radius: 50%;
+    position: relative;
+    flex-shrink: 0;
+    box-shadow:
+      0 6px 22px rgba(0, 0, 0, 0.5),
+      inset 0 -4px 10px rgba(0, 0, 0, 0.35),
+      inset 0 4px 8px rgba(255, 255, 255, 0.08);
+  }
+  .ad-wax-sable {
+    background: radial-gradient(circle at 32% 28%, #8a3148, var(--ink-sable) 60%, #3a0e1c);
+  }
+  .ad-wax-lucian {
+    background: radial-gradient(circle at 32% 28%, #7a3a7a, var(--ink-lucian) 60%, #2a0f2a);
+  }
+  .ad-wax-vesper {
+    background: radial-gradient(circle at 32% 28%, #9a4585, var(--ink-vesper) 60%, #3a1530);
+  }
+  .ad-wax-glyph {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.75;
+  }
+  .ad-wax-glyph svg {
+    width: 34px;
+    height: 34px;
+    stroke: var(--cream);
+    stroke-width: 1.2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ad-name {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-size: 30px;
+    font-weight: 500;
+    line-height: 1;
+  }
+  .ad-name-lens {
+    display: block;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 9px;
+    letter-spacing: 0.28em;
+    color: var(--foxed);
+    text-transform: uppercase;
+    font-style: normal;
+    margin-top: 8px;
+    font-weight: 400;
+  }
+  .ad-name-sable { color: #d8956e; }
+  .ad-name-lucian { color: #c895c8; }
+  .ad-name-vesper { color: #d49ec0; }
+  .ad-invite {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-size: 18px;
+    line-height: 1.45;
+    color: var(--cream);
+  }
+
+  /* Shelf blocks */
+  .ad-shelf-block { margin: 0 0 88px; }
+  .ad-shelf-block h3 {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 28px;
+    color: #e8d9b2;
+    max-width: 680px;
+    line-height: 1.25;
+    margin: 0 0 8px;
+  }
+  .ad-shelf-block h3::before {
+    content: "";
+    display: inline-block;
+    width: 22px;
+    height: 1px;
+    background: var(--brass);
+    vertical-align: middle;
+    margin: 0 14px 6px 0;
+  }
+  .ad-shelf-source {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--foxed);
+    text-transform: uppercase;
+    margin: 0 0 20px 36px;
+  }
+  .ad-shelf-source em {
+    color: var(--cream);
+    font-style: italic;
+    font-family: var(--font-display), Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0.01em;
+  }
+  .ad-shelf {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 18px 14px 14px;
+    background: linear-gradient(180deg, rgba(20, 10, 10, 0) 0%, rgba(20, 10, 10, 0.5) 100%);
+    border-bottom: 3px solid #2a1812;
+    box-shadow:
+      inset 0 -1px 0 rgba(196, 154, 74, 0.18),
+      0 14px 22px -16px rgba(0, 0, 0, 0.7);
+    position: relative;
+    min-height: 172px;
+  }
+  .ad-spine {
+    height: 184px;
+    padding: 18px 4px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    transform-origin: center;
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-size: 13.5px;
+    line-height: 1.18;
+    color: var(--cream);
+    cursor: default;
+    /* Slower spring-like ease so rapid mouse-over-shelf doesn't tornado. */
+    transition: transform 0.45s cubic-bezier(0.2, 0.65, 0.2, 1), box-shadow 0.45s ease;
+    text-align: start;
+    border: none;
+    border-radius: 2px;
+    box-shadow:
+      inset 1px 0 0 rgba(255, 255, 255, 0.07),
+      inset -1px 0 0 rgba(0, 0, 0, 0.45),
+      0 3px 6px rgba(0, 0, 0, 0.35);
+    letter-spacing: 0.015em;
+    border-top: 2px solid rgba(196, 154, 74, 0.42);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    will-change: transform;
+  }
+  .ad-spine-clickable {
+    cursor: pointer;
+  }
+  .ad-spine-clickable:hover {
+    transform: rotate(180deg) translateY(6px); /* +y in pre-rotation = lift up after rotation */
+    box-shadow:
+      inset 1px 0 0 rgba(255, 255, 255, 0.12),
+      inset -1px 0 0 rgba(0, 0, 0, 0.55),
+      0 10px 16px rgba(0, 0, 0, 0.55);
+  }
+  .ad-spine-clickable:focus-visible {
+    outline: 2px solid var(--brass);
+    outline-offset: 2px;
+  }
+  .ad-spine-busy {
+    opacity: 0.55;
+    cursor: progress;
+  }
+  /* Fallback (non-clickable, decorative) spines lift gently too — same easing. */
+  .ad-spine:not(.ad-spine-clickable):hover {
+    transform: rotate(180deg) translateY(4px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ad-spine {
+      transition: box-shadow 0.2s ease;
+    }
+    .ad-spine-clickable:hover,
+    .ad-spine:not(.ad-spine-clickable):hover {
+      transform: rotate(180deg);
+    }
+  }
+  .ad-spine-title {
+    display: inline-block;
+    max-block-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Author is dropped from real-library spines — the shelf section already
+     names the source folder ("FROM Erotica · 56 VOLUMES"). The fallback
+     shelves still ship author tokens; render those as a quiet rule + caps
+     mono so they read as a colophon, not a second title. */
+  .ad-spine-au {
+    display: inline-block;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(196, 154, 74, 0.28);
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-style: normal;
+    font-size: 8.5px;
+    letter-spacing: 0.2em;
+    color: rgba(242, 230, 208, 0.5);
+    text-transform: uppercase;
+  }
+  /* Widen all spines so longer titles breathe; titles still ellipsis-truncate. */
+  .ad-spine-wine { background: linear-gradient(90deg, #3a0e18, #5b1a2a, #3a0e18); width: 38px; color: #f0d2c0; }
+  .ad-spine-aubergine { background: linear-gradient(90deg, #2a0f2a, #4a1f4a, #2a0f2a); width: 36px; color: #e8c8e0; }
+  .ad-spine-plum { background: linear-gradient(90deg, #3a1530, #6b2a5c, #3a1530); width: 42px; color: #f0d0e0; }
+  .ad-spine-oxblood { background: linear-gradient(90deg, #1a0608, #2A0E10, #1a0608); width: 38px; color: #e8d0c0; }
+  .ad-spine-brass { background: linear-gradient(90deg, #5a4520, #8a6a2f, #5a4520); width: 36px; color: #1a1410; }
+  .ad-spine-foxed { background: linear-gradient(90deg, #4a3a26, #7a5e3a, #4a3a26); width: 40px; color: #1a1410; }
+  .ad-spine-cream { background: linear-gradient(90deg, #3a3024, #6a5840, #3a3024); width: 38px; color: #f2e6d0; }
+  .ad-spine-ink { background: linear-gradient(90deg, #0e0a08, #1A1410, #0e0a08); width: 38px; color: #c49a4a; }
+  .ad-spine-tall { height: 172px; }
+  .ad-spine-short { height: 148px; }
+
+  /* Roleplay envelope */
+  .ad-invite-card {
+    display: flex;
+    align-items: center;
+    gap: 36px;
+    padding: 32px 40px;
+    margin: 0 0 88px;
+    background: linear-gradient(135deg, #1f1010 0%, #2a1416 100%);
+    border: 1px solid rgba(196, 154, 74, 0.22);
+    position: relative;
+    box-shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.8);
+  }
+  .ad-invite-card::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border: 1px dashed rgba(196, 154, 74, 0.18);
+    pointer-events: none;
+  }
+  .ad-envelope { width: 84px; height: 84px; position: relative; flex-shrink: 0; }
+  .ad-envelope-seal {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #8a3148, var(--ink-sable) 60%, #3a0e1c);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), inset 0 -3px 6px rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    color: #f0d0c0;
+    font-size: 22px;
+    z-index: 2;
+  }
+  .ad-envelope::before,
+  .ad-envelope::after {
+    content: "";
+    position: absolute;
+    inset: 8px 0;
+    border: 1px solid rgba(196, 154, 74, 0.35);
+    background: linear-gradient(135deg, #2a1410, #1a0c0a);
+  }
+  .ad-envelope::after {
+    clip-path: polygon(0 0, 50% 48%, 100% 0, 100% 100%, 0 100%);
+  }
+  .ad-invite-text { flex: 1; }
+  .ad-invite-tag {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    color: var(--brass);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .ad-invite-text p {
+    font-family: var(--font-display), Georgia, serif;
+    font-style: italic;
+    font-size: 22px;
+    line-height: 1.4;
+    color: var(--cream);
+    max-width: 640px;
+    margin: 0;
+  }
+  .ad-invite-em { color: #d8956e; }
+  .ad-invite-link {
+    color: var(--brass);
+    border-bottom: 1px dotted var(--brass);
+    text-decoration: none;
+    padding-bottom: 1px;
+    font-size: 16px;
+    margin-left: 6px;
+  }
+  .ad-invite-link:hover { color: #f7c97a; border-color: #f7c97a; }
+
+  /* Privacy strip */
+  .ad-privacy {
+    text-align: center;
+    padding: 48px 0 24px;
+    margin-top: 32px;
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.22em;
+    color: var(--foxed);
+    text-transform: lowercase;
+    border-top: 1px solid rgba(155, 123, 79, 0.14);
+  }
+  .ad-privacy-line {
+    display: inline-block;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--brass);
+  }
+  .ad-privacy-leave {
+    background: transparent;
+    border: 0;
+    color: var(--foxed);
+    text-decoration: none;
+    margin: 0 4px;
+    font: inherit;
+    cursor: pointer;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+  .ad-privacy-leave:hover { color: var(--cream); }
+  .ad-privacy-peg {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 30%, #d6a85a, var(--brass) 70%, #6a4a1a);
+    vertical-align: middle;
+    margin: 0 8px 2px;
+    box-shadow: 0 0 6px rgba(247, 201, 122, 0.4);
+  }
+
+  @media (max-width: 760px) {
+    .ad-room { padding: 28px 18px 22px; }
+    .ad-hero h1 { font-size: 38px; }
+    .ad-hero-b { font-size: 28px; padding-left: 18px; }
+    .ad-cast-row { flex-direction: column; align-items: flex-start; gap: 44px; padding-top: 48px; }
+    .ad-player { margin-top: 0 !important; }
+    .ad-shelf { flex-wrap: wrap; justify-content: center; }
+    .ad-invite-card { flex-direction: column; text-align: center; padding: 24px 18px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ad-gate, .ad-content { transition: none; }
+    .ad-seal-half { transition: none !important; }
+    .ad-gate-cracked .ad-seal-half.ad-seal-l,
+    .ad-gate-cracked .ad-seal-half.ad-seal-r { transform: none; }
+    .ad-spine:hover { transform: none; }
+  }
