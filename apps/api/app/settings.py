@@ -38,10 +38,18 @@ class Settings(BaseSettings):
     grok_model: str = Field("grok-3", alias="GROK_MODEL")
     local_llm_base_url: str | None = Field(None, alias="LOCAL_LLM_BASE_URL")
 
-    embeddings_provider: str = Field("openai", alias="EMBEDDINGS_PROVIDER")
+    embeddings_provider: str = Field("local", alias="EMBEDDINGS_PROVIDER")
     openai_embeddings_model: str = Field("text-embedding-3-large", alias="OPENAI_EMBEDDINGS_MODEL")
     local_embeddings_base_url: str | None = Field(None, alias="LOCAL_EMBEDDINGS_BASE_URL")
-    local_embeddings_model: str = Field("BAAI/bge-m3", alias="LOCAL_EMBEDDINGS_MODEL")
+    local_embeddings_model: str = Field("Qwen/Qwen3-Embedding-0.6B", alias="LOCAL_EMBEDDINGS_MODEL")
+    local_embeddings_revision: str | None = Field(None, alias="LOCAL_EMBEDDINGS_REVISION")
+    local_embeddings_dimension: int = Field(1024, ge=1, le=3072, alias="LOCAL_EMBEDDINGS_DIMENSION")
+    local_embeddings_device: str = Field("cpu", alias="LOCAL_EMBEDDINGS_DEVICE")
+    local_embeddings_cache_dir: str = Field(".readagain/models", alias="LOCAL_EMBEDDINGS_CACHE_DIR")
+    local_embeddings_max_tokens: int = Field(2048, ge=128, le=8192, alias="LOCAL_EMBEDDINGS_MAX_TOKENS")
+    local_embeddings_threads: int = Field(4, ge=1, le=32, alias="LOCAL_EMBEDDINGS_THREADS")
+    local_embeddings_query_prompt: str | None = Field(None, alias="LOCAL_EMBEDDINGS_QUERY_PROMPT")
+    local_embeddings_document_prompt: str = Field("", alias="LOCAL_EMBEDDINGS_DOCUMENT_PROMPT")
 
     reranker_provider: str = Field("none", alias="RERANKER_PROVIDER")  # none|cohere|local
     reranker_model: str = Field("rerank-v3.5", alias="RERANKER_MODEL")

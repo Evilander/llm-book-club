@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .routers import health, ingest, sessions, tts, memory, library, admin, auth, companion, connections
+from .routers import health, ingest, sessions, tts, memory, library, admin, auth, companion, connections, search_index
 from .providers.llm.codex_runtime import close_codex_runtime
 from .db.init_db import init_db
 from .settings import settings
@@ -51,4 +51,5 @@ app.include_router(library.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(connections.router, prefix="/v1")
+app.include_router(search_index.router, prefix="/v1")
 app.include_router(memory.router)

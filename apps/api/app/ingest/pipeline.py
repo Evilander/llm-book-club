@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import uuid
 import logging
-import math
 from pathlib import Path
 from datetime import datetime
 
@@ -12,6 +11,8 @@ from sqlalchemy.orm import Session
 from ..db.models import Book, Section, Chunk, IngestStatus, ReadingUnit, ReadingUnitType, ReadingUnitStatus, BookMemory
 from ..db.engine import SessionLocal
 from ..providers.embeddings.factory import get_embeddings_client
+from ..providers.embeddings.space import configured_space, storage_batch
+from ..providers.embeddings.persistence import register_space
 from ..providers.llm.factory import get_llm_client
 from .extractor import extract_text
 from .chunker import chunk_sections, chunk_text, estimate_tokens, estimate_reading_time
@@ -45,16 +46,8 @@ def _merge_book_metadata(existing: dict | None, extracted: dict | None) -> dict:
     return merged
 
 
-def validate_embeddings(embeddings: list[list[float]], expected_count: int) -> None:
-    if not expected_count:
-        raise ValueError("No readable passages were found in this file.")
-    if len(embeddings) != expected_count:
-        raise ValueError("The embedding provider returned an incomplete batch. Please try preparing the book again.")
-    for vector in embeddings:
-        if len(vector) != 3072 or not all(isinstance(value, (float, int)) and math.isfinite(value) for value in vector):
-            raise ValueError("The embedding provider must return finite 3072-dimensional vectors for this library.")
-        if not any(vector):
-            raise ValueError("The embedding provider returned an empty vector. Please try preparing the book again.")
+def validate_embeddings(embeddings: list[list[float]], expected_count: int) -> list[list[float]]:
+    return storage_batch(embeddings, expected_count, configured_space().dimension)
 
 
 def _stage_metadata(existing: dict | None, stage: str) -> dict:
@@ -173,11 +166,14 @@ async def run_ingestion_pipeline(
         _write_book_stage(db, book, "embedding")
         embeddings_client = get_embeddings_client()
         embeddings = await embeddings_client.embed(all_chunks_for_embedding)
-        validate_embeddings(embeddings, len(chunk_records))
+        embeddings = validate_embeddings(embeddings, len(chunk_records))
+        space = configured_space()
+        register_space(db, space)
 
         # Step 5: Update chunks with embeddings
         for chunk_record, embedding in zip(chunk_records, embeddings):
             chunk_record.embedding = embedding
+            chunk_record.embedding_space = space.id
 
         db.commit()
 
@@ -438,11 +434,14 @@ async def run_intelligent_ingestion_pipeline(
         _write_book_stage(db, book, "embedding")
         embeddings_client = get_embeddings_client()
         embeddings = await embeddings_client.embed(all_chunks_for_embedding)
-        validate_embeddings(embeddings, len(chunk_records))
+        embeddings = validate_embeddings(embeddings, len(chunk_records))
+        space = configured_space()
+        register_space(db, space)
 
         # Step 4: Update chunks with embeddings
         for chunk_record, embedding in zip(chunk_records, embeddings):
             chunk_record.embedding = embedding
+            chunk_record.embedding_space = space.id
 
         db.commit()
         logger.info("Embeddings generated and stored")

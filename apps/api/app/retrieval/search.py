@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -13,6 +12,8 @@ from sqlalchemy import text
 
 from ..db import Chunk, Section
 from ..providers.embeddings.factory import get_embeddings_client
+from ..providers.embeddings.space import configured_space
+from .embedding import query_vector
 from .cache import get_embedding_cache
 
 logger = logging.getLogger(__name__)
@@ -69,22 +70,11 @@ async def vector_search(
     if limit <= 0 or section_ids == [] or chunk_ids == []:
         return []
 
-    # Check embedding cache before generating a new embedding
-    cache = get_embedding_cache()
-    query_embedding = cache.get(query)
-    cache_hit = query_embedding is not None
-    if query_embedding is None:
-        embeddings_client = get_embeddings_client()
-        query_embedding = await embeddings_client.embed_single(query)
-
-    if (
-        len(query_embedding) != 3072
-        or not all(isinstance(x, (float, int)) and math.isfinite(x) for x in query_embedding)
-        or not any(query_embedding)
-    ):
-        raise ValueError("The library requires finite 3072-dimensional embeddings from the configured model.")
-    if not cache_hit:
-        cache.set(query, query_embedding)
+    space = configured_space()
+    # Avoid paid encoding when this book has no vectors in the current space.
+    if not db.query(Chunk.id).filter(Chunk.book_id == book_id, Chunk.embedding_space == space.id, Chunk.embedding.isnot(None)).first():
+        return []
+    query_embedding = await query_vector(query, space, client=get_embeddings_client(), cache=get_embedding_cache())
     embedding_str = "[{}]".format(",".join(str(x) for x in query_embedding))
 
     # Continue scanning when a book/slice filter discards ANN neighbors.
@@ -95,6 +85,7 @@ async def vector_search(
         WITH candidates AS MATERIALIZED (
             SELECT c.* FROM chunks c
             WHERE c.book_id = :book_id AND c.embedding IS NOT NULL
+              AND c.embedding_space = :embedding_space
     """
 
     if section_ids:
@@ -116,6 +107,7 @@ async def vector_search(
 
     params: dict = {
         "book_id": book_id,
+        "embedding_space": space.id,
         "embedding_vec": embedding_str,
         "limit": limit,
         "candidate_limit": max(40, limit * 4),

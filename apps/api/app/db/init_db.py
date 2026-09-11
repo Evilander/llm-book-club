@@ -36,13 +36,15 @@ def validate_unversioned_library(connection) -> None:
     problems = []
     for name, table in Base.metadata.tables.items():
         if name not in tables:
-            if name not in {"reading_prefs", "library_configuration"}:  # Known additive migrations.
+            if name not in {"reading_prefs", "library_configuration", "embedding_spaces"}:  # Known additive migrations.
                 problems.append(f"missing table {name}")
             continue
         columns = {column['name']: column for column in schema.get_columns(name)}
         for expected in table.columns:
             actual = columns.get(expected.name)
             if actual is None:
+                if (name, expected.name) in {("chunks", "embedding_space"), ("messages", "embedding_space"), ("messages", "embedding")}:
+                    continue  # Added in migration 009.
                 problems.append(f"missing column {name}.{expected.name}")
                 continue
             expected_type = expected.type.compile(dialect=connection.dialect).upper()

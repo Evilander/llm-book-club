@@ -17,6 +17,10 @@ class EmbeddingsClient(Protocol):
         """
         ...
 
+    async def embed_single(self, text: str) -> list[float]:
+        """Embed a search query using the model's query instruction."""
+        ...
+
     @property
     def dimension(self) -> int:
         """Return the embedding dimension."""

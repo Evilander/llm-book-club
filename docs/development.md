@@ -12,13 +12,13 @@ cp apps/web/.env.local.example apps/web/.env.local
 docker compose up --build --wait
 ```
 
-Configure a provider in the API environment file before preparing books. The default embedding model uses 3,072 dimensions. The model must return that dimension consistently; shorter, missing, non-finite, or zero vectors cause preparation to fail explicitly. Local model defaults are not automatically compatible with this schema.
+The default CPU encoder prepares books without a hosted embedding account. Configure discussion access in Settings or the API environment file. Native vector dimensions are checked against the configured model, normalized, and zero-padded to the existing storage dimension. Retrieval also requires matching model provenance. See [local search and memory](local-search.md) for model changes and refreshing existing books.
 
 The migration service must finish before the API and worker start. The API verifies the migration head, generated full-text column, and search indexes. A failure stops startup. `/health` returns HTTP 503 when Postgres or Redis is unavailable and omits connection exception details.
 
 Services bind to loopback by default. The API runs as an unprivileged container user and includes its migrations. Before the API and worker start, `storage-init` gives that user ownership of the managed upload volume, including uploads written by older containers running as root. This one-time startup service has no network and does not mount the external books folder.
 
-In-process local embeddings/reranking are optional: install `apps/api/requirements-local.txt`, or set `INSTALL_LOCAL_MODELS=true` before building Docker images. Hosted or OpenAI-compatible HTTP providers do not need those large model dependencies.
+Docker includes CPU model dependencies by default. For a non-Docker installation, install `apps/api/requirements-local.txt` as well as the base requirements. Installations that use only HTTP embedding/reranking providers can build with `INSTALL_LOCAL_MODELS=false` to omit those dependencies. The deterministic integration image intentionally uses that smaller build; its tests do not measure local model quality.
 
 ## Automated checks
 

@@ -46,6 +46,10 @@ let failCompanionEdition = false;
 let activeProvider = 'openai';
 let chatgptConnected = false;
 let chatgptLoginState = 'pending';
+let searchState = 'pending';
+let searchPolls = 0;
+let rejectSearchRefresh = true;
+let rejectSearchPoll = true;
 const loginFixture = () => ({ login_id: 'fixture-login', state: chatgptLoginState, user_code: chatgptLoginState === 'pending' ? 'TEST-CODE' : null, verification_url: chatgptLoginState === 'pending' ? 'https://auth.openai.com/codex/device' : null, expires_in: 600 });
 async function fixture(context) {
   await context.route('**/v1/**', async route => {
@@ -75,6 +79,18 @@ async function fixture(context) {
     }
     if (path.endsWith('/reader-location')) return json({ page: Math.floor(cite.char_start / Number(url.searchParams.get('page_size') || 1800)) + 1, section_id: 's1', char_start: cite.char_start });
     if (path.endsWith('/explore')) { const idx = url.searchParams.get('section_id') === 's2' ? 1 : 0; const text = idx ? text2 : text1; return json({ ...book, sections, active_section: { ...sections[idx], text, chunks: [{ chunk_id: `c${idx+1}`, section_id: `s${idx+1}`, char_start: 0, char_end: text.length }], source_refs: [], chunk_count: 1 }, audiobook_matches: [], has_local_audiobook: false, progress: { resume_section_id: 's1', reading_progress_pct: 12 } }); }
+    if (path === '/v1/books/garden/search-index') {
+      if (req.method() === 'POST') {
+        assert.equal(req.headers()['x-readagain-settings'], '1');
+        if (rejectSearchRefresh) { rejectSearchRefresh = false; return json({ detail: 'Search preparation is unavailable. Try again.' }, 503); }
+        searchState = 'queued'; return json({ state: searchState });
+      }
+      if (searchState === 'queued' && ++searchPolls > 1) {
+        if (rejectSearchPoll) { rejectSearchPoll = false; return json({ detail: 'test polling outage' }, 503); }
+        searchState = 'ready';
+      }
+      return json({ state: searchState, ready: searchState === 'ready', local: true, passages: 12, passages_ready: searchState === 'ready' ? 12 : 3, thoughts: 4, thoughts_ready: searchState === 'ready' ? 4 : 0 });
+    }
     if (path === '/v1/books/garden') return json(book);
     if (path === '/v1/sessions/start') return json({ session_id: 'club' });
     const sessionMatch = path.match(/^\/v1\/sessions\/(companion|club)(.*)$/);
@@ -188,6 +204,14 @@ await page.getByRole('alert').filter({ hasText: 'This page couldn’t' }).waitFo
 await page.getByRole('button', { name: 'Try again', exact: true }).first().click();
 await page.waitForURL('**?page=1&size=*');
 await page.goto(`${base}/books/garden`);
+await page.getByRole('button', { name: 'Refresh search & memory', exact: true }).click();
+await page.getByRole('alert').filter({ hasText: 'Search preparation is unavailable' }).waitFor();
+await page.getByRole('button', { name: 'Refresh search & memory', exact: true }).click();
+await page.getByRole('status').filter({ hasText: 'Remembering this book' }).waitFor();
+await page.screenshot({ path: `${output}/search-memory-refresh.png`, fullPage: true });
+await page.getByRole('button', { name: 'Check again', exact: true }).waitFor();
+await page.getByRole('button', { name: 'Check again', exact: true }).click();
+await page.locator('.book-search-status').waitFor({ state: 'detached' });
 await page.getByRole('button', { name: 'Start a book club session', exact: true }).click();
 await page.waitForURL('**/sessions/club');
 await page.getByText('The garden lets things change.', { exact: false }).waitFor();

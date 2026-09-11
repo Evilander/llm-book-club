@@ -8,7 +8,7 @@ from rq.registry import StartedJobRegistry
 
 from .settings import settings
 
-redis_conn = Redis.from_url(settings.redis_url)
+redis_conn = Redis.from_url(settings.redis_url, socket_connect_timeout=1, socket_timeout=2)
 ingest_queue = Queue("ingest", connection=redis_conn)
 BINDERY_PAUSED_KEY = "bindery:paused"
 BINDERY_PAUSE_SLEEP_SEC = 2
@@ -87,3 +87,26 @@ def enqueue_ingestion_from_path(book_id: str, file_path: str, filename: str):
         result_ttl=86400,
     )
     return job.id
+
+
+def index_job_id(book_id: str, space_id: str) -> str:
+    return f"search-{book_id}-{space_id}"
+
+
+def index_job_state(book_id: str, space_id: str) -> str | None:
+    job = ingest_queue.fetch_job(index_job_id(book_id, space_id))
+    return job.get_status().value if job else None
+
+
+def enqueue_index_refresh(book_id: str, space_id: str) -> str:
+    from .services.search_index import run_index_refresh
+    job_id = index_job_id(book_id, space_id)
+    # A double click or two tabs should not enqueue two model runs.
+    with redis_conn.lock(f"enqueue-{job_id}", timeout=10, blocking_timeout=1):
+        job = ingest_queue.fetch_job(job_id)
+        if job:
+            if job.get_status().value in {"queued", "started", "deferred", "scheduled"}:
+                return job_id
+            job.delete()
+        ingest_queue.enqueue(run_index_refresh, book_id, space_id, job_id=job_id, job_timeout="30m", result_ttl=86400)
+    return job_id

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, BookOpen, Loader2, Users } from "lucide-react";
 import { API_BASE } from "@/lib/utils";
 import { SessionSetup } from "@/components/session-setup";
+import { BookSearchStatus } from "@/components/book-search-status";
 import type { ExplorePayload } from "@/types/api";
 
 export function BookOverview({ bookId, onStartSession }: { bookId: string; onStartSession: (sessionId: string) => void }) {
@@ -49,6 +50,7 @@ export function BookOverview({ bookId, onStartSession }: { bookId: string; onSta
       {error ? <div className="library-notice" role="alert"><p>{error}</p><button className="text-link" onClick={() => book ? void startClub() : setAttempt((n) => n + 1)} disabled={starting}>Try again</button></div> : null}
       {book ? <>
         <header className="overview-title"><p className="quiet-eyebrow">A book worth spending time with</p><h1>{book.title}</h1>{book.author ? <p>{book.author}</p> : null}</header>
+        <BookSearchStatus bookId={bookId} />
         <div className="overview-options">
           <section><BookOpen size={25} strokeWidth={1.3} aria-hidden="true" /><h2>One page at a time.</h2><p>Settle into the book. Your reading companion is a tap away whenever a sentence makes you stop and think.</p><Link href={`/books/${bookId}/read`} className="reading-button">Open the book <ArrowRight size={16} /></Link></section>
           <section><Users size={25} strokeWidth={1.3} aria-hidden="true" /><h2>Let’s talk about it.</h2><p>Sam guides the conversation. Ellis looks closely at the language. Kit brings another point of view. You set the pace.</p>

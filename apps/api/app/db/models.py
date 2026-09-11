@@ -25,6 +25,13 @@ class Base(DeclarativeBase):
     pass
 
 
+class EmbeddingModel(Base):
+    """Non-secret provenance for persisted search and memory vectors."""
+    __tablename__ = "embedding_spaces"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    spec_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class LibraryConfiguration(Base):
     """Non-secret choices shared by this single-owner library and its worker."""
     __tablename__ = "library_configuration"
@@ -291,8 +298,10 @@ class Chunk(Base):
 
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # pgvector embedding (1536 for text-embedding-3-small, 3072 for large)
+    # Normalized native vector, zero-padded to the existing storage dimension.
+    # NULL space means legacy/unknown provenance: never use for vector search.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
+    embedding_space: Mapped[str | None] = mapped_column(String(64), ForeignKey("embedding_spaces.id"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -300,6 +309,7 @@ class Chunk(Base):
 
     __table_args__ = (
         Index("ix_chunks_book_section", "book_id", "section_id"),
+        Index("ix_chunks_book_space", "book_id", "embedding_space"),
         Index("ix_chunks_section_order", "section_id", "order_index"),
         # HNSW index on embedding is created via Alembic migration (001) using raw SQL:
         #   CREATE INDEX ix_chunks_embedding_hnsw ON chunks
@@ -357,6 +367,9 @@ class Message(Base):
 
     role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Derived only from the reader's own text. Never used as citation evidence.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
+    embedding_space: Mapped[str | None] = mapped_column(String(64), ForeignKey("embedding_spaces.id"), nullable=True)
 
     # Citations: JSON array of {chunk_id, char_start, char_end, text_snippet}
     citations: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)

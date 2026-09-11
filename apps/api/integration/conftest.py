@@ -21,6 +21,7 @@ if make_url(TEST_URL).get_backend_name() != "postgresql":
 os.environ["DATABASE_URL"] = TEST_URL
 os.environ["REDIS_URL"] = os.environ.get("TEST_REDIS_URL", "redis://127.0.0.1:56379/0")
 os.environ["APP_ENV"] = "test"
+os.environ["EMBEDDINGS_PROVIDER"] = "openai"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import init_db as bootstrap  # noqa: E402
