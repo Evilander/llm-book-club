@@ -29,7 +29,7 @@ from ..auth.service import (
 from ..db import ReadingPrefs, User, get_db
 from ..settings import settings
 from ..providers.selection import selected_provider, canonical_provider
-from .connections import chatgpt_status
+from ..providers.readiness import chatgpt_status, local_status
 
 router = APIRouter(tags=["auth"])
 
@@ -190,7 +190,8 @@ async def auth_status(
     ]
 
     if settings.local_llm_base_url or active == "local":
-        providers.append(ProviderStatus(provider="local", label="Local model", configured_auth_mode="local", oauth_supported=False, oauth_ready=False, connected=bool(settings.local_llm_base_url), note="Uses the local model endpoint configured on this server."))
+        local = await local_status()
+        providers.append(ProviderStatus(provider="local", label="Local model", configured_auth_mode="local", oauth_supported=False, oauth_ready=False, connected=local.connected, note=local.message))
     if settings.grok_api_key or active == "grok":
         providers.append(ProviderStatus(provider="grok", label="Grok", configured_auth_mode="api_key", oauth_supported=False, oauth_ready=False, connected=bool(settings.grok_api_key), note="Uses your configured xAI API account."))
     for provider in providers:

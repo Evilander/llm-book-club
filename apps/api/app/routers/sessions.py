@@ -12,6 +12,7 @@ from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
 from ..discussion.agents import verify_citation_groups
 from ..services.reading_scope import ReaderPosition, session_scope
+from ..providers.readiness import require_reading_connection
 from ..rate_limit import limiter
 from ..settings import settings
 
@@ -27,6 +28,14 @@ def resolve_scope(db, session, position=None):
 
 def make_engine(db, session, slice_data, position=None):
     return DiscussionEngine(db, session, slice_data, reading_scope=resolve_scope(db, session, position))
+
+
+async def make_ready_engine(db, session, slice_data, position=None):
+    # Validate the edition before setup, and reject missing connections before
+    # the engine persists a reader turn or opens a successful SSE response.
+    scope = resolve_scope(db, session, position)
+    await require_reading_connection(db)
+    return DiscussionEngine(db, session, slice_data, reading_scope=scope)
 
 
 class StartSessionRequest(BaseModel):
@@ -323,7 +332,7 @@ async def start_discussion(session_id: str, db: Session = Depends(get_db)):
     )
 
     # Create discussion engine
-    engine = make_engine(db, session, slice_data)
+    engine = await make_ready_engine(db, session, slice_data)
 
     # Generate opening
     response = await engine.start_discussion()
@@ -373,7 +382,7 @@ async def send_message(
     )
 
     # Create discussion engine
-    engine = make_engine(db, session, slice_data, req.reading_position)
+    engine = await make_ready_engine(db, session, slice_data, req.reading_position)
 
     # Process message
     responses = await engine.process_user_message(
@@ -424,7 +433,7 @@ async def stream_message(
         section_ids=session.section_ids,
     )
 
-    engine = make_engine(db, session, slice_data, req.reading_position)
+    engine = await make_ready_engine(db, session, slice_data, req.reading_position)
 
     async def generate():
         try:
@@ -437,8 +446,8 @@ async def stream_message(
                     event_id = event.get("event_id", "")
                     payload = json.dumps(event, ensure_ascii=False)
                     yield f"id: {event_id}\ndata: {payload}\n\n"
-        except Exception as e:
-            payload = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
+        except Exception:
+            payload = json.dumps({"type": "error", "error": "The reply was interrupted. Refresh the conversation to check what was saved."}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
 
     return StreamingResponse(
@@ -472,7 +481,7 @@ async def challenge_claim(
         section_ids=session.section_ids,
     )
 
-    engine = make_engine(db, session, slice_data)
+    engine = await make_ready_engine(db, session, slice_data)
     response = await engine.get_skeptic_response(claim)
 
     return MessageResponse(
@@ -516,7 +525,7 @@ async def generate_summary(session_id: str, db: Session = Depends(get_db)):
         section_ids=session.section_ids,
     )
 
-    engine = make_engine(db, session, slice_data)
+    engine = await make_ready_engine(db, session, slice_data)
     summary = await engine.generate_summary()
 
     return {"session_id": session_id, "summary": summary}

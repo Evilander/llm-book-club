@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     )
     grok_api_key: str | None = Field(None, alias="GROK_API_KEY")
     grok_model: str = Field("grok-3", alias="GROK_MODEL")
+    local_llm_model: str = Field("llama3.2", alias="LOCAL_LLM_MODEL", min_length=1, max_length=200, pattern=r"^\S+$")
     local_llm_base_url: str | None = Field(None, alias="LOCAL_LLM_BASE_URL")
 
     embeddings_provider: str = Field("local", alias="EMBEDDINGS_PROVIDER")

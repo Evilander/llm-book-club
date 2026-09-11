@@ -26,10 +26,8 @@ class OpenAIClient:
         if not self.api_key and not self.is_local:
             raise ValueError("OpenAI API key not configured")
 
+        # Explicit local IDs (including gpt-oss and aliases) stay unchanged.
         self.model = model
-        # For Ollama, use llama3.2 if model is "default" or starts with "gpt"
-        if self.is_local and (model == "default" or model.startswith("gpt")):
-            self.model = "llama3.2"
 
         # Populated after a stream() call is fully consumed
         self._last_stream_usage: LLMResponse | None = None

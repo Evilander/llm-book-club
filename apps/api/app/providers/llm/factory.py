@@ -41,7 +41,7 @@ def get_llm_client(provider: str | None = None, *, db: Session | None = None) ->
         return OpenAIClient(
             api_key="local",
             base_url=settings.local_llm_base_url,
-            model="default",
+            model=settings.local_llm_model,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")

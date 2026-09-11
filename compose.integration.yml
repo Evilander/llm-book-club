@@ -11,6 +11,7 @@ x-api: &test-api
     APP_ENV: test
     LLM_PROVIDER: local
     LOCAL_LLM_BASE_URL: http://provider:9000/v1
+    LOCAL_LLM_MODEL: integration-fixture
     EMBEDDINGS_PROVIDER: local
     LOCAL_EMBEDDINGS_BASE_URL: http://provider:9000/v1
     LOCAL_EMBEDDINGS_MODEL: integration-fixture

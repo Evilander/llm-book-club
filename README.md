@@ -114,7 +114,7 @@ Most settings live in `apps/api/.env`.
 
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY`: hosted LLM provider credentials.
 - `LLM_PROVIDER`: `chatgpt`, `openai`, `claude`, `gemini`, `grok`, or `local`.
-- `LOCAL_LLM_BASE_URL`: OpenAI-compatible local endpoint, such as Ollama.
+- `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`: local endpoint and installed model ID; see [connection setup](docs/chatgpt-connection.md#local-models-and-connection-checks).
 - `EMBEDDINGS_PROVIDER`: `openai`, `gemini`, or `local`.
 - `OPENAI_EMBEDDINGS_MODEL`, `LOCAL_EMBEDDINGS_BASE_URL`, `LOCAL_EMBEDDINGS_MODEL`: embedding configuration.
 - `RERANKER_PROVIDER`: `none`, `cohere`, or `local`.
