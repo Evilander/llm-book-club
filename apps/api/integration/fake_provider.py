@@ -7,6 +7,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
 app = FastAPI()
+requests_seen = []
+
+
+@app.get("/test/requests")
+def captured_requests():
+    return requests_seen
+
+
+@app.post("/test/reset")
+def reset_requests():
+    requests_seen.clear()
+    return {"ok": True}
 
 
 @app.post("/v1/embeddings")
@@ -22,6 +34,7 @@ async def embeddings(request: Request):
 async def complete(request: Request):
     payload = await request.json()
     messages = payload["messages"]
+    requests_seen.append(payload)
     system = messages[0]["content"]
     if "CURRENT PAGE" in system:
         current = json.loads(messages[-1]["content"])["current_page"]
@@ -35,9 +48,9 @@ async def complete(request: Request):
             quote = passage.strip().split(".")[0] + "."
             memory = any("cobalt-thread" in m["content"] for m in messages[1:-1])
             prefix = "I remember your cobalt-thread observation. " if memory else ""
-            answer = prefix + f'The compass invites a question about trust. [cite: {chunk_id}, "{quote}"] What do you notice?'
+            answer = json.dumps({"analysis": prefix + "The compass invites a question about trust [1]. What do you notice?", "citations": [{"marker": 1, "chunk_id": chunk_id, "quote": quote}]})
         else:
-            answer = "What would you like to look at together?"
+            answer = json.dumps({"analysis": "What would you like to look at together?", "citations": []})
     if not payload.get("stream"):
         return {"choices": [{"message": {"content": answer}}], "usage": {"prompt_tokens": 20, "completion_tokens": 20}, "model": "integration-fixture"}
     async def events():

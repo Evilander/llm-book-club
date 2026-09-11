@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from ..db import DiscussionSession, Message, MessageRole, DiscussionMode, BookMemory, ReadingUnit
 from ..providers.llm.factory import get_llm_client
 from ..providers.llm.base import LLMMessage
-from ..retrieval.selector import select_session_slice, SessionSlice
+from ..retrieval.selector import SessionSlice
+from ..retrieval.filters import build_evidence_block
 from .agents import (
     FacilitatorAgent,
     CloseReaderAgent,
@@ -16,18 +17,17 @@ from .agents import (
     AfterDarkGuideAgent,
     AgentResponse,
     Citation,
-    parse_citations,
     parse_response_auto,
-    verify_citations,
-    attempt_citation_repair,
 )
 from ..settings import settings
 from .prompts import DISCUSSION_PROMPTS
 from .memory_prompts import MemoryContext, build_memory_from_db
-from .metrics import CitationMetrics, build_citation_metrics, TurnMetrics
-from .token_budget import truncate_history, estimate_tokens
+from .metrics import TurnMetrics
+from .token_budget import truncate_history
 from .sentence_splitter import SentenceSplitter
+from .analysis_stream import AnalysisStream
 from ..services.book_recall import book_recall
+from ..services.reading_scope import ReadingScope, session_scope
 
 import logging as _logging
 import re
@@ -142,19 +142,24 @@ class DiscussionEngine:
         session: DiscussionSession,
         slice_data: SessionSlice,
         memory: MemoryContext | None = None,
+        reading_scope: ReadingScope | None = None,
     ):
         self.db = db
         self.session = session
         self.slice = slice_data
         self.mode = session.mode.value if hasattr(session.mode, 'value') else session.mode
 
-        # Try to load memory from database if not provided
-        if memory is None:
+        self.scope = reading_scope or session_scope(db, session)
+        # Existing aggregate summaries lack page provenance. Reader thoughts
+        # remain available through scoped recall; unpositioned plot summaries
+        # are only usable once the reading boundary reaches the book's end.
+        if not self.scope.covers_book:
+            memory = None
+        elif memory is None:
             memory = self._load_memory_context()
         self.memory = memory
-        self.preferences = session.preferences_json or {}
-        current_page = self.preferences.get("current_page_text")
-        context_text = current_page if self.preferences.get("reading_companion") and current_page else slice_data.context_text
+        self.preferences = dict(session.preferences_json or {})
+        context_text = build_evidence_block(self.scope.initial_evidence)
         agent_context = _build_agent_context(context_text, self.preferences)
 
         # Detect adult mode from session preferences
@@ -176,8 +181,10 @@ class DiscussionEngine:
             context=agent_context,
             mode=self.mode,
             memory=self.memory,
-            allowed_section_ids=self.slice.section_ids,
-            allowed_chunk_ids=self.slice.chunk_ids,
+            allowed_section_ids=self.scope.section_ids,
+            allowed_chunk_ids=list(self.scope.spans),
+            allowed_spans=self.scope.spans,
+            initial_evidence=self.scope.initial_evidence,
             adult_mode=self.is_adult,
         )
         self.close_reader = CloseReaderAgent(
@@ -187,8 +194,10 @@ class DiscussionEngine:
             context=agent_context,
             mode=self.mode,
             memory=self.memory,
-            allowed_section_ids=self.slice.section_ids,
-            allowed_chunk_ids=self.slice.chunk_ids,
+            allowed_section_ids=self.scope.section_ids,
+            allowed_chunk_ids=list(self.scope.spans),
+            allowed_spans=self.scope.spans,
+            initial_evidence=self.scope.initial_evidence,
             adult_mode=self.is_adult,
         )
         self.skeptic = SkepticAgent(
@@ -198,8 +207,10 @@ class DiscussionEngine:
             context=agent_context,
             mode=self.mode,
             memory=self.memory,
-            allowed_section_ids=self.slice.section_ids,
-            allowed_chunk_ids=self.slice.chunk_ids,
+            allowed_section_ids=self.scope.section_ids,
+            allowed_chunk_ids=list(self.scope.spans),
+            allowed_spans=self.scope.spans,
+            initial_evidence=self.scope.initial_evidence,
             adult_mode=self.is_adult,
         )
         self.after_dark_guide = AfterDarkGuideAgent(
@@ -209,8 +220,10 @@ class DiscussionEngine:
             context=agent_context,
             mode=self.mode,
             memory=self.memory,
-            allowed_section_ids=self.slice.section_ids,
-            allowed_chunk_ids=self.slice.chunk_ids,
+            allowed_section_ids=self.scope.section_ids,
+            allowed_chunk_ids=list(self.scope.spans),
+            allowed_spans=self.scope.spans,
+            initial_evidence=self.scope.initial_evidence,
             adult_mode=self.is_adult,
         )
 
@@ -354,6 +367,7 @@ class DiscussionEngine:
             .filter(Message.session_id == self.session.id, Message.content != "")
             .order_by(Message.created_at.desc(), Message.id.desc())
         )
+        message_query = self.scope.filter_history(message_query)
         if settings.max_history_messages > 0:
             message_query = message_query.limit(settings.max_history_messages)
         messages = list(reversed(message_query.all()))
@@ -372,7 +386,7 @@ class DiscussionEngine:
 
         recent_ids = {m.id for m in messages[-settings.max_history_messages:]} if settings.max_history_messages > 0 else {m.id for m in messages}
         query = next((m.content for m in reversed(messages) if m.role == MessageRole.USER), "")
-        recall = book_recall(self.db, self.session.book_id, self.slice.section_ids, query, recent_ids)
+        recall = book_recall(self.db, self.session.book_id, self.scope.section_ids, query, recent_ids, scope=self.scope)
         if recall:
             # Keep the role prompt as the only system message (Anthropic also
             # expects one). Memory is labelled user data, not a second prompt.
@@ -407,7 +421,7 @@ class DiscussionEngine:
             role=role,
             content=content,
             citations=citations,
-            metadata_json=metadata_json,
+            metadata_json={**(metadata_json or {}), "reading_scope": self.scope.metadata},
         )
         self.db.add(message)
         self.db.commit()
@@ -597,7 +611,7 @@ class DiscussionEngine:
         Stream agent responses for a user message.
 
         Yields SSE-friendly event dicts with hardened protocol fields:
-          - event_id: unique per event (e.g. "evt_1"), usable as SSE id: for reconnection
+          - event_id: unique within this turn (e.g. "evt_1"); durable replay is not implemented
           - turn_id: unique per user turn (uuid4), groups all events in one turn
           - agent_id: role string identifying the agent (on agent-scoped events)
           - sequence: monotonically increasing int for ordering / dedup
@@ -611,9 +625,8 @@ class DiscussionEngine:
           - {"type":"agent_error", ..., "error":...}  (partial failure)
           - {"type":"done", ...}
 
-        The ``sentence_ready`` events enable sentence-level TTS pipelining:
-        the frontend can fire a TTS request for each sentence as it completes,
-        rather than waiting for the full message_end. Each event includes the
+        The ``sentence_ready`` events use finalized, citation-checked prose and
+        are emitted immediately before ``message_end``. Each includes the
         agent's assigned ``voice`` for consistent per-agent TTS.
         """
         import uuid
@@ -667,17 +680,19 @@ class DiscussionEngine:
             }
 
             chunks_list: list[str] = []
-            splitter = SentenceSplitter()
+            prose_stream = AnalysisStream()
             try:
                 async for delta in agent.stream_with_retrieval(
                     conversation_history if conversation_history is not None else history,
                     query=retrieval_query,
                 ):
-                    # Record TTFT on first content delta of the entire turn
-                    if not chunks_list and turn_metrics.ttft_ms == 0.0:
+                    chunks_list.append(delta)
+                    visible = prose_stream.feed(delta)
+                    if not visible:
+                        continue
+                    if turn_metrics.ttft_ms == 0.0:
                         turn_metrics.record_ttft()
                     event_seq += 1
-                    chunks_list.append(delta)
                     yield {
                         "type": "message_delta",
                         "event_id": f"evt_{event_seq}",
@@ -686,42 +701,9 @@ class DiscussionEngine:
                         "sequence": event_seq,
                         "role": role,
                         "session_id": self.session.id,
-                        "delta": delta,
+                        "delta": visible,
                     }
 
-                    # Sentence-level TTS pipelining: emit complete sentences
-                    # as they're detected so the frontend can fire TTS early.
-                    for sentence in splitter.feed(delta):
-                        event_seq += 1
-                        yield {
-                            "type": "sentence_ready",
-                            "event_id": f"evt_{event_seq}",
-                            "turn_id": turn_id,
-                            "agent_id": role,
-                            "sequence": event_seq,
-                            "role": role,
-                            "voice": voice,
-                            "session_id": self.session.id,
-                            "sentence": sentence,
-                            "sentence_index": splitter.sentence_index - 1,
-                        }
-
-                # Flush any remaining buffered text as a final sentence
-                remainder = splitter.flush()
-                if remainder:
-                    event_seq += 1
-                    yield {
-                        "type": "sentence_ready",
-                        "event_id": f"evt_{event_seq}",
-                        "turn_id": turn_id,
-                        "agent_id": role,
-                        "sequence": event_seq,
-                        "role": role,
-                        "voice": voice,
-                        "session_id": self.session.id,
-                        "sentence": remainder,
-                        "sentence_index": splitter.sentence_index - 1,
-                    }
             except Exception as e:
                 # Partial failure: rollback any poisoned transaction state so
                 # subsequent agents can still use the DB session.
@@ -745,64 +727,10 @@ class DiscussionEngine:
             raw_text = "".join(chunks_list)
             clean_text, citations = parse_response_auto(raw_text)
 
-            # Verify citations with span alignment and build metrics
-            cit_metrics: CitationMetrics | None = None
-            if citations:
-                verified, invalid = verify_citations(
-                    self.db,
-                    citations,
-                    allowed_chunk_ids=self.slice.chunk_ids,
-                )
-                total = len(verified) + len(invalid)
-                invalid_ratio = len(invalid) / total if total > 0 else 0.0
-
-                # Track pre-repair state for metrics
-                pre_repair_verified_count = len(verified)
-                pre_repair_invalid_count = len(invalid)
-                repair_attempted = False
-                repair_succeeded = False
-                post_repair_verified_count = 0
-                post_repair_invalid_count = 0
-
-                # Attempt repair if >50% invalid and agent has retrieved chunks
-                if invalid_ratio > 0.5 and hasattr(agent, '_last_retrieved_chunks') and agent._last_retrieved_chunks:
-                    repair_attempted = True
-                    repaired_text = await attempt_citation_repair(
-                        agent.llm,
-                        raw_text,
-                        agent._last_retrieved_chunks,
-                        invalid,
-                    )
-                    if repaired_text:
-                        new_clean, new_cits = parse_response_auto(repaired_text)
-                        if new_cits:
-                            new_verified, new_invalid = verify_citations(
-                                self.db,
-                                new_cits,
-                                allowed_chunk_ids=self.slice.chunk_ids,
-                            )
-                            new_total = len(new_verified) + len(new_invalid)
-                            new_invalid_ratio = len(new_invalid) / new_total if new_total > 0 else 0.0
-                            post_repair_verified_count = len(new_verified)
-                            post_repair_invalid_count = len(new_invalid)
-                            if new_invalid_ratio < invalid_ratio:
-                                repair_succeeded = True
-                                verified = new_verified
-                                invalid = new_invalid
-                                clean_text = new_clean
-
-                citations = verified + invalid
-
-                # Build citation metrics from final verified/invalid
-                cit_metrics = build_citation_metrics(
-                    verified,
-                    invalid,
-                    repair_attempted=repair_attempted,
-                    repair_succeeded=repair_succeeded,
-                    post_repair_verified=post_repair_verified_count,
-                    post_repair_invalid=post_repair_invalid_count,
-                )
-                cit_metrics.log_summary(role)
+            clean_text, citation_objects, cit_metrics = await agent._verify_and_maybe_repair(
+                raw_text, clean_text, citations,
+            )
+            citations = self._serialize_citations(citation_objects)
 
             # Capture token usage from the stream (if the provider reported it)
             stream_usage = getattr(agent, "last_stream_usage", None)
@@ -827,6 +755,18 @@ class DiscussionEngine:
                 citations,
                 metadata_json=msg_metadata,
             )
+
+            splitter = SentenceSplitter()
+            sentences = splitter.feed(clean_text)
+            remainder = splitter.flush()
+            if remainder:
+                sentences.append(remainder)
+            for sentence_index, sentence in enumerate(sentences):
+                event_seq += 1
+                yield {"type": "sentence_ready", "event_id": f"evt_{event_seq}",
+                       "turn_id": turn_id, "agent_id": role, "sequence": event_seq,
+                       "role": role, "voice": voice, "session_id": self.session.id,
+                       "sentence": sentence, "sentence_index": sentence_index}
 
             event_seq += 1
             yield {

@@ -23,6 +23,7 @@ Rules for citations:
 - Each marker [1], [2] etc. in your analysis must have a corresponding citation entry
 - Only cite from the provided evidence passages, using the chunk IDs shown
 - Stay inside the current reading slice; if the evidence does not support a claim yet, say so
+- The evidence can end partway through a chapter. Do not complete it from prior knowledge or reveal later events, even for a familiar book
 - Write your analysis naturally — the markers should feel organic, not mechanical
 """
 

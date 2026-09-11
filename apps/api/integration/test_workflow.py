@@ -50,7 +50,7 @@ def test_upload_read_discuss_and_recall_across_sessions(kind):
         "The cartographer carried an amber compass into the garden. "
         "She trusted its needle even when she could no longer see the path. "
         "A blue thread marked the place where her map had been folded.\n\n"
-    ) * 8
+    ) * 8 + "\n\nUNREAD_ENDING_MARKER. The garden keeper was the cartographer all along."
     with httpx.Client(base_url=url, timeout=30) as client:
         assert client.get("/health").json()["ok"]
         upload = client.post("/v1/ingest", files={"file": (f"the-compass.{kind}", document_bytes(kind, prose), "application/octet-stream")})
@@ -67,32 +67,48 @@ def test_upload_read_discuss_and_recall_across_sessions(kind):
         page = client.get(f"/v1/books/{book_id}/reader", params={"page": 1, "page_size": 600}).json()
         assert "amber compass" in page["text"]
         sections = list(dict.fromkeys(span["section_id"] for span in page["chunks"]))
-        companion = client.post(f"/v1/books/{book_id}/companion", json={"section_ids": sections, "page": 1, "page_size": 600})
+        companion = client.post(f"/v1/books/{book_id}/companion", json={"section_ids": sections, "page": 1, "page_size": 600, "edition_id": page["edition_id"]})
         companion.raise_for_status()
         session_id = companion.json()["session_id"]
-        request = {"session_id": session_id, "page": 1, "page_size": 600}
+        early_position = companion.json()["reading_position"]
+        assert early_position["edition_id"] == page["edition_id"]
+        request = {"session_id": session_id, **early_position}
         notes = client.post(f"/v1/books/{book_id}/reader-notes", json=request)
         notes.raise_for_status()
         note = notes.json()["notes"][0]
         assert note["verified"] and note["quote"] in page["text"]
         assert client.post(f"/v1/books/{book_id}/reader-notes", json=request).json()["cached"]
 
-        def send(session, message):
+        def send(session, message, position=None):
             with client.stream("POST", f"/v1/sessions/{session}/message/stream",
-                               json={"content": message, "include_close_reader": False, "adaptive": False}) as response:
+                               json={"content": message, "include_close_reader": False, "adaptive": False, "reading_position": position}) as response:
                 response.raise_for_status()
                 events = [json.loads(line[6:]) for line in response.iter_lines() if line.startswith("data: ")]
             assert not [e for e in events if e["type"] in {"error", "agent_error"}], events
             final = next(e for e in events if e["type"] == "message_end")
             assert final["citations"] and all(c["verified"] for c in final["citations"])
             assert events[-1]["type"] == "done"
+            assert "".join(e["delta"] for e in events if e["type"] == "message_delta") == final["content"]
+            assert all('"analysis"' not in e.get("sentence", "") for e in events)
             sequences = [e["sequence"] for e in events if "sequence" in e]
             assert sequences == sorted(set(sequences))
             return final
 
-        final = send(session_id, "My cobalt-thread observation connects the compass with trust.")
-        history = client.get(f"/v1/sessions/{session_id}/messages").json()["messages"]
+        last_page = client.get(f"/v1/books/{book_id}/reader", params={"page": page["total_pages"], "page_size": 600}).json()
+        later = client.post(f"/v1/books/{book_id}/companion", json={"section_ids": list(dict.fromkeys(s["section_id"] for s in last_page["chunks"])), "page": last_page["page"], "page_size": 600, "edition_id": last_page["edition_id"]})
+        later.raise_for_status()
+        send(session_id, "LATER_READER_THOUGHT connects the cartographer with the keeper.", later.json()["reading_position"])
+        with httpx.Client(base_url=os.environ.get("TEST_PROVIDER_URL", "http://127.0.0.1:59000"), timeout=10) as provider:
+            provider.post("/test/reset").raise_for_status()
+            final = send(session_id, "My cobalt-thread observation connects the compass with trust.", early_position)
+            captured = provider.get("/test/requests").json()
+            assert captured, "The provider must actually receive the earlier-page turn."
+            actual_prompts = json.dumps(captured)
+            assert "LATER_READER_THOUGHT" not in actual_prompts
+            assert "UNREAD_ENDING_MARKER" not in actual_prompts
+        history = client.get(f"/v1/sessions/{session_id}/messages", params=early_position).json()["messages"]
         assert any(m["id"] == final["message_id"] and m["content"] == final["content"] for m in history)
+        assert not any("LATER_READER_THOUGHT" in m["content"] for m in history)
         citation = final["citations"][0]
         location = client.get(f"/v1/books/{book_id}/reader-location",
                               params={"chunk_id": citation["chunk_id"], "char_start": citation["char_start"], "page_size": 600})

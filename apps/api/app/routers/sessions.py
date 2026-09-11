@@ -1,7 +1,7 @@
 """Discussion session endpoints."""
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -9,10 +9,23 @@ from sqlalchemy.orm import Session
 from ..db import get_db, Book, DiscussionSession, Message, DiscussionMode, MessageRole
 from ..retrieval.selector import select_session_slice
 from ..discussion.engine import DiscussionEngine
+from ..discussion.agents import verify_citation_groups
+from ..services.reading_scope import ReaderPosition, session_scope
 from ..rate_limit import limiter
 from ..settings import settings
 
 router = APIRouter(tags=["sessions"])
+
+
+def resolve_scope(db, session, position=None):
+    try:
+        return session_scope(db, session, position)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from None
+
+
+def make_engine(db, session, slice_data, position=None):
+    return DiscussionEngine(db, session, slice_data, reading_scope=resolve_scope(db, session, position))
 
 
 class StartSessionRequest(BaseModel):
@@ -35,6 +48,7 @@ class MessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=10000)
     include_close_reader: bool = True
     adaptive: bool = True  # Use MARS-style adaptive agent selection
+    reading_position: ReaderPosition | None = None
 
 
 class MessageFeedbackRequest(BaseModel):
@@ -199,17 +213,27 @@ def update_session_preferences(
 
 
 @router.get("/sessions/{session_id}/messages")
-def get_session_messages(session_id: str, db: Session = Depends(get_db)):
+def get_session_messages(session_id: str, db: Session = Depends(get_db),
+                         page: int | None = Query(default=None, ge=1),
+                         page_size: int = Query(default=1800, ge=200, le=4000),
+                         edition_id: str | None = Query(default=None, pattern=r"^[a-f0-9]{64}$")):
     """Get all messages in a session."""
     session = db.query(DiscussionSession).filter(DiscussionSession.id == session_id).first()
     if not session:
         raise HTTPException(404, "Session not found")
 
-    messages = (
+    position = ReaderPosition(page=page, page_size=page_size, edition_id=edition_id) if page is not None else None
+    scope = resolve_scope(db, session, position)
+    query = (
         db.query(Message)
         .filter(Message.session_id == session_id)
         .order_by(Message.created_at)
-        .all()
+    )
+    messages = scope.filter_history(query).all() if (session.preferences_json or {}).get("reading_companion") else query.all()
+    messages = [m for m in messages if not (m.metadata_json or {}).get("reader_notes_key")]
+    checked = verify_citation_groups(
+        db, [m.citations or [] for m in messages],
+        allowed_chunk_ids=list(scope.spans), allowed_spans=scope.spans,
     )
 
     return {
@@ -219,11 +243,11 @@ def get_session_messages(session_id: str, db: Session = Depends(get_db)):
                 "id": m.id,
                 "role": m.role.value,
                 "content": m.content,
-                "citations": m.citations,
+                "citations": citations,
                 "feedback": m.feedback,
                 "created_at": m.created_at.isoformat(),
             }
-            for m in messages if not (m.metadata_json or {}).get("reader_notes_key")
+            for m, (citations, _invalid) in zip(messages, checked)
         ],
     }
 
@@ -298,7 +322,7 @@ async def start_discussion(session_id: str, db: Session = Depends(get_db)):
     )
 
     # Create discussion engine
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data)
 
     # Generate opening
     response = await engine.start_discussion()
@@ -348,7 +372,7 @@ async def send_message(
     )
 
     # Create discussion engine
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data, req.reading_position)
 
     # Process message
     responses = await engine.process_user_message(
@@ -399,7 +423,7 @@ async def stream_message(
         section_ids=session.section_ids,
     )
 
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data, req.reading_position)
 
     async def generate():
         try:
@@ -446,7 +470,7 @@ async def challenge_claim(
         section_ids=session.section_ids,
     )
 
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data)
     response = await engine.get_skeptic_response(claim)
 
     return MessageResponse(
@@ -470,7 +494,7 @@ def advance_phase(session_id: str, db: Session = Depends(get_db)):
         section_ids=session.section_ids,
     )
 
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data)
     new_phase = engine.advance_phase()
 
     return {"session_id": session_id, "new_phase": new_phase}
@@ -490,7 +514,7 @@ async def generate_summary(session_id: str, db: Session = Depends(get_db)):
         section_ids=session.section_ids,
     )
 
-    engine = DiscussionEngine(db, session, slice_data)
+    engine = make_engine(db, session, slice_data)
     summary = await engine.generate_summary()
 
     return {"session_id": session_id, "summary": summary}

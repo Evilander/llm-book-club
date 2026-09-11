@@ -20,11 +20,13 @@ ReadAgain is a quiet place to read a book with a thoughtful companion. The book 
 
 Installation, migrations, ingestion, and the complete discussion path now have reproducible checks against real Postgres and Redis, with a deterministic HTTP provider.
 
-1. Tighten discussion citation verification. The older fuzzy word-overlap fallback is insufficient proof of a quotation, even though margin questions already require exact spans.
-2. Enforce the current reading boundary in retrieval and memory, including re-reading and returning to earlier pages.
-3. Make provider setup and embedding-model compatibility work end to end; evaluate supported native sign-in and verify a live conversation.
-4. Improve long-book recall and reader control over saved memory, backed by realistic retrieval and discussion evaluations.
-5. Complete release checks for privacy, dependency maintenance, backup/restore, and the repository's canonical branch.
+Discussion citations now require real source spans. Page positions are pinned to each turn, retrieval/history/recall honor that boundary, and structured replies stream prose without JSON syntax. See [the contract and its limits](grounding-and-reading-boundaries.md). These changes strengthen deterministic grounding; they do not establish live model quality.
+
+1. Make provider setup and embedding-model compatibility work end to end; evaluate supported native sign-in and verify a live conversation.
+2. Improve long-book recall and reader control over saved memory, backed by realistic retrieval and discussion evaluations.
+3. Evaluate claim-level grounding and spoilers from model pretraining; measure first-token and total reply latency with real providers.
+4. Add reliable turn replay and revision-aware reading-text caching before scaling conversation history and library size.
+5. Complete privacy, dependency-maintenance, and backup/restore release checks. `main` is now the repository's default branch.
 
 The existing browser fixture is useful UI evidence. The HTTP provider fixture proves transport, persistence, and retrieval plumbing. Neither is evidence of live model quality. Keep that distinction in release notes.
 

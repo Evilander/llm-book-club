@@ -32,6 +32,7 @@ docker compose -p readagain-verification -f compose.integration.yml --profile ap
 export TEST_DATABASE_URL=postgresql+psycopg://readagain_test:integration-only@127.0.0.1:55432/postgres
 export TEST_REDIS_URL=redis://127.0.0.1:56379/0
 export TEST_APP_URL=http://127.0.0.1:58000
+export TEST_PROVIDER_URL=http://127.0.0.1:59000
 cd apps/api
 python -m pytest integration -q
 cd ../..
@@ -40,7 +41,7 @@ docker compose -p readagain-verification -f compose.integration.yml --profile ap
 
 The verification stack uses temporary database storage and generated test documents. Its local HTTP provider produces deterministic embeddings and replies; no API keys or real books are used. Each database test creates and removes only its own randomly named `readagain_test_*` database. Set `TEST_DATABASE_URL` only to an isolated server with database-creation permission.
 
-The workflow tests upload EPUB, PDF, and TXT through the API, wait for the real RQ worker, open the reader, validate margin quotes, stream a discussion, open citations, and check that an earlier thought reaches a later session. Database tests cover fresh and concurrent startup, rollback after failures, upgrades from the old stamped schema, explicit legacy adoption, and both retrieval branches.
+The workflow tests upload EPUB, PDF, and TXT through the API, wait for the real RQ worker, open the reader, validate margin quotes, stream a discussion, open citations, and check that an earlier thought reaches a later session. They also return from a later discussion to an earlier page and inspect the provider's HTTP requests for unread text or later thoughts. The fixture provider's loopback port 59000 exposes test-only capture/reset endpoints; it is not part of the production app. Database tests cover fresh and concurrent startup, rollback after failures, upgrades from the old stamped schema, explicit legacy adoption, and both retrieval branches. See [grounding and reading boundaries](grounding-and-reading-boundaries.md) for the citation, Unicode, and stream contracts.
 
 For UI checks:
 

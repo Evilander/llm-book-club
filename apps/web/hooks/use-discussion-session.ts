@@ -5,6 +5,8 @@ import { API_BASE } from "@/lib/utils";
 import { readEventStream } from "@/lib/event-stream";
 import type { CitationData, Message, SessionData } from "@/types/api";
 
+export interface ReaderPosition { page: number; page_size: number; edition_id: string }
+
 type ExperienceMode = "audio" | "text";
 interface OnSentenceReadyParams { sentence: string; role: string; voice: string }
 interface UseDiscussionSessionOptions {
@@ -13,6 +15,7 @@ interface UseDiscussionSessionOptions {
   onSentenceReady: (params: OnSentenceReadyParams) => void;
   startAutomatically?: boolean;
   includeCloseReader?: boolean;
+  readingPosition?: ReaderPosition;
 }
 function extractSpeakableSegments(buffer: string) {
   const segments: string[] = [];
@@ -44,7 +47,8 @@ function extractSpeakableSegments(buffer: string) {
   return { segments, remaining };
 }
 
-export function useDiscussionSession({ sessionId, experienceMode, onSentenceReady, startAutomatically = true, includeCloseReader = true }: UseDiscussionSessionOptions) {
+export function useDiscussionSession({ sessionId, experienceMode, onSentenceReady, startAutomatically = true, includeCloseReader = true, readingPosition }: UseDiscussionSessionOptions) {
+  const positionQuery = readingPosition ? `?${new URLSearchParams({ page: String(readingPosition.page), page_size: String(readingPosition.page_size), edition_id: readingPosition.edition_id })}` : "";
   const [session, setSession] = useState<SessionData | null>(null);
   const [bookTitle, setBookTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -79,7 +83,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
     try {
       const [sessionRes, messagesRes] = await Promise.all([
         fetch(`${API_BASE}/v1/sessions/${sessionId}`, { signal: controller.signal }),
-        fetch(`${API_BASE}/v1/sessions/${sessionId}/messages`, { signal: controller.signal }),
+        fetch(`${API_BASE}/v1/sessions/${sessionId}/messages${positionQuery}`, { signal: controller.signal }),
       ]);
       if (!sessionRes.ok || !messagesRes.ok) throw new Error("load");
       const sessionData: SessionData = await sessionRes.json();
@@ -102,7 +106,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
         const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/start-discussion`, { method: "POST", signal: controller.signal });
         if (!res.ok) { startedRef.current = false; throw new Error("start"); }
         // Reload canonical IDs, including on older start-discussion responses.
-        const saved = await fetch(`${API_BASE}/v1/sessions/${sessionId}/messages`, { signal: controller.signal });
+        const saved = await fetch(`${API_BASE}/v1/sessions/${sessionId}/messages${positionQuery}`, { signal: controller.signal });
         if (!saved.ok) throw new Error("history");
         const data = await saved.json();
         if (controller.signal.aborted) return null;
@@ -123,7 +127,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
         setActiveAgent(null);
       }
     }
-  }, [sessionId, startAutomatically]);
+  }, [sessionId, startAutomatically, positionQuery]);
 
   useEffect(() => {
     void loadSession();
@@ -152,11 +156,12 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
     try {
       const response = await fetch(`${API_BASE}/v1/sessions/${sessionId}/message/stream`, {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ content, include_close_reader: includeCloseReader, adaptive: includeCloseReader }),
+        body: JSON.stringify({ content, include_close_reader: includeCloseReader, adaptive: includeCloseReader, ...(readingPosition ? { reading_position: readingPosition } : {}) }),
       });
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => null);
         if (typeof data?.detail === "string" && data.detail.includes("Session message limit")) throw new Error("session-limit");
+        if (response.status === 409 && readingPosition) throw new Error("page-changed");
         throw new Error("send");
       }
       accepted = true;
@@ -213,7 +218,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
       return !agentFailed;
     } catch (failure) {
       if (!controller.signal.aborted) {
-        setError(failure instanceof Error && failure.message === "session-limit" ? "This conversation is full. Reconnect your companion to continue with your saved book memory." : accepted ? "The reply was interrupted. Refresh the conversation to check what was saved before sending again." : "Your message couldn’t be sent. Check your connection and try again.");
+        setError(failure instanceof Error && failure.message === "session-limit" ? "This conversation is full. Reconnect your companion to continue with your saved book memory." : failure instanceof Error && failure.message === "page-changed" ? "The book has changed. Reconnect your companion to reopen this page and find our place." : accepted ? "The reply was interrupted. Refresh the conversation to check what was saved before sending again." : "Your message couldn’t be sent. Check your connection and try again.");
         if (!accepted) setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
       }
       return false;

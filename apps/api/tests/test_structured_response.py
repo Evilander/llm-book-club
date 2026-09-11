@@ -117,8 +117,8 @@ class TestParseStructuredResponse:
         assert citations[0]["chunk_id"] == "c1"
         assert citations[1]["chunk_id"] == "c2"
 
-    def test_skips_invalid_citation_entries(self):
-        """Non-dict entries or entries missing chunk_id/quote should be skipped."""
+    def test_preserves_invalid_citations_and_missing_markers_for_verification(self):
+        """Invalid references must not disappear before the response is checked."""
         response = json.dumps({
             "analysis": "Has some invalid citations [1] [2].",
             "citations": [
@@ -131,9 +131,10 @@ class TestParseStructuredResponse:
         result = parse_structured_response(response)
         assert result is not None
         _, citations = result
-        # Only the first one is valid
-        assert len(citations) == 1
         assert citations[0]["chunk_id"] == "c1"
+        assert any(c["text"] == "missing id" and not c["chunk_id"] for c in citations)
+        assert any(c["chunk_id"] == "c4" and not c["text"] for c in citations)
+        assert any(c["marker"] is None for c in citations)  # Unresolved [2].
 
     def test_strips_whitespace_from_chunk_id_and_quote(self):
         response = json.dumps({

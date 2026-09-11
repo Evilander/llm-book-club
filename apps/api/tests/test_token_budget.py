@@ -314,23 +314,18 @@ class TestTrimEvidence:
         assert len(trimmed) == 1
         assert trimmed[0].chunk_id == "c1"
 
-    def test_single_result_always_kept(self):
-        """A single result is always kept, even if it exceeds the budget.
-
-        The code only breaks when 'kept' is non-empty, so the first result
-        is always included regardless of its size.
-        """
+    def test_single_oversized_result_is_clipped_without_mutating_source(self):
+        """One oversized passage must not bypass the evidence allowance."""
         results = [_make_result("c1", "a" * 400, score=0.9)]  # 100 tokens
         trimmed = trim_evidence(results, max_tokens=5)
         assert len(trimmed) == 1
         assert trimmed[0].chunk_id == "c1"
+        assert trimmed[0].text == "a" * 20
+        assert trimmed[0].char_end == 20
+        assert len(results[0].text) == 400
 
-    def test_first_result_always_kept_even_when_oversized(self):
-        """Even with multiple results, the first is always kept.
-
-        The first result (200 tokens) exceeds the budget (10), but it is
-        still kept because the 'and kept' guard prevents dropping it.
-        """
+    def test_oversized_first_result_uses_all_allowance(self):
+        """Clipping the best result leaves no room for lower-ranked evidence."""
         results = [
             _make_result("c1", "a" * 800, score=0.9),  # 200 tokens
             _make_result("c2", "b" * 40, score=0.8),    # 10 tokens
@@ -338,6 +333,11 @@ class TestTrimEvidence:
         trimmed = trim_evidence(results, max_tokens=10)
         assert len(trimmed) == 1
         assert trimmed[0].chunk_id == "c1"
+        assert len(trimmed[0].text) == 40
+
+    def test_clipped_evidence_preserves_graphemes(self):
+        results = [_make_result("c1", "abce\u0301 further words")]
+        assert trim_evidence(results, max_tokens=1)[0].text == "abc"
 
     def test_disabled_when_zero(self):
         """max_tokens=0 disables trimming; return all results."""

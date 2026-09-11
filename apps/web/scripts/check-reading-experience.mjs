@@ -35,12 +35,14 @@ function pageData(p, size = 1800) {
   };
   const start = boundary((p-1)*size), end = boundary(p*size);
   const chunks = [{ chunk_id: 'c1', section_id: 's1', char_start: 0, char_end: text1.length }, { chunk_id: 'c2', section_id: 's2', char_start: text1.length+2, char_end: fullText.length }].filter(chunk => chunk.char_start < end && chunk.char_end > start);
-  return { ...book, page: p, total_pages: Math.ceil(fullText.length/size), page_size: size, text: fullText.slice(start, end), char_start: start, char_end: end, current_section_id: chunks[0].section_id, current_section_title: sections[chunks[0].section_id === 's1' ? 0 : 1].title, current_section_order: chunks[0].section_id === 's1' ? 0 : 1, chunks };
+  return { ...book, edition_id: 'e'.repeat(64), page: p, total_pages: Math.ceil(fullText.length/size), page_size: size, text: fullText.slice(start, end), char_start: start, char_end: end, current_section_id: chunks[0].section_id, current_section_title: sections[chunks[0].section_id === 's1' ? 0 : 1].title, current_section_order: chunks[0].section_id === 's1' ? 0 : 1, chunks };
 }
 const cite = { chunk_id: 'c1', text: quote1, char_start: text1.indexOf(quote1), char_end: text1.indexOf(quote1) + quote1.length, verified: true, match_type: 'exact' };
 const histories = { companion: [], club: [{ id: 'opening', role: 'facilitator', content: 'Let’s stay with the garden for a moment. Eleanor seems to be learning a way of paying attention that asks very little of her. What do you notice about the way the house and the garden differ?', citations: [cite], created_at: '2026-09-06T10:00:00Z' }, { id: 'reader-old', role: 'user', content: 'The garden lets things change. The house seems to hold them still.', citations: [], created_at: '2026-09-06T10:01:00Z' }, { id: 'ell', role: 'close_reader', content: 'That difference is there in the verbs: the house can only “guess,” while the garden “knows.” I’m interested in how this reverses the usual idea that shelter gives us certainty.\n\nDoes the garden feel more welcoming, or simply less demanding?', citations: [cite], created_at: '2026-09-06T10:02:00Z' }] };
 let prefs = { theme: 'cream-daylight', font_family: 'serif', font_size_px: 20, line_height: 1.75, measure_ch: 62, focus_reading: false, focus_reading_intensity: 40 };
 let failNextPage = false;
+let companionGate = null;
+let failCompanionEdition = false;
 async function fixture(context) {
   await context.route('**/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname;
@@ -52,7 +54,14 @@ async function fixture(context) {
     if (path.endsWith('/local/folders')) return json({ books_dir: '/books', total_books: 4, folders: [], root_book_count: 4 });
     if (path.endsWith('/reading-prefs')) { if (req.method() === 'PATCH') prefs = { ...prefs, ...req.postDataJSON() }; return json(prefs); }
     if (path === '/v1/books/garden/reader') { if (failNextPage) { failNextPage = false; return json({ detail: 'test outage' }, 503); } return json(pageData(Number(url.searchParams.get('page') || 1), Number(url.searchParams.get('page_size') || 1800))); }
-    if (path === '/v1/books/garden/companion') return json({ session_id: 'companion', remembered_turns: histories.companion.length });
+    if (path === '/v1/books/garden/companion') {
+      if (companionGate && req.postDataJSON().page === 2) {
+        companionGate.arrived();
+        await companionGate.wait;
+      }
+      if (failCompanionEdition) { failCompanionEdition = false; return json({ detail: 'This book has changed.' }, 409); }
+      return json({ session_id: 'companion', remembered_turns: histories.companion.length, reading_position: { page: req.postDataJSON().page, page_size: req.postDataJSON().page_size, edition_id: 'e'.repeat(64) } });
+    }
     if (path.endsWith('/reader-notes')) {
       const p = req.postDataJSON().page, current = pageData(p, req.postDataJSON().page_size);
       const quote = current.text.includes(quote1) ? quote1 : current.text.trim().split(/[.!?]/)[0] + (current.text.includes('.') ? '.' : '');
@@ -128,8 +137,22 @@ await page.getByRole('button', { name: 'Send to your companion' }).click();
 await page.getByText('I remember your thought about the garden', { exact: false }).waitFor();
 assert.equal(await page.locator('.companion-message.from-companion').count(), 1);
 assert.equal(await page.locator('.companion-message.from-companion .companion-message-prose').innerText(), histories.companion.at(-1).content, 'partial final event preserves streamed text without replaying duplicate deltas');
+let releaseCompanion;
+let companionArrived;
+const companionArrival = new Promise(resolve => { companionArrived = resolve; });
+companionGate = { arrived: companionArrived, wait: new Promise(resolve => { releaseCompanion = resolve; }) };
+await page.getByRole('textbox', { name: 'Your thought or question' }).fill('A thought to carry to the next page.');
+failCompanionEdition = true;
 await page.getByRole('button', { name: 'Next page', exact: true }).click();
 await page.waitForURL('**?page=2&size=*');
+await companionArrival;
+assert.equal(await page.locator('.companion-conversation').count(), 0, 'old page conversation is hidden while a new reading boundary loads');
+releaseCompanion(); companionGate = null;
+await page.getByRole('alert').filter({ hasText: 'The book has changed' }).waitFor();
+await page.getByRole('button', { name: 'Try again', exact: true }).click();
+await page.getByRole('textbox', { name: 'Your thought or question' }).waitFor();
+assert.equal(await page.getByRole('textbox', { name: 'Your thought or question' }).inputValue(), 'A thought to carry to the next page.', 'unsent thought survives page changes and a reconnect');
+await page.getByRole('textbox', { name: 'Your thought or question' }).fill('');
 await page.getByRole('tab', { name: /In the margin/ }).click();
 await page.getByText('What changes as you stay with this passage?', { exact: true }).waitFor();
 assert.notEqual(await page.locator('.passage-mark').first().innerText(), quote1);
@@ -186,6 +209,8 @@ await phone.getByRole('button', { name: 'Close book panel' }).click();
 assert.equal(await phone.getByRole('dialog').count(), 0);
 assert.deepEqual(errors, [], 'no browser runtime errors');
 assert.ok(posts.some(p => p.path.endsWith('/companion') && p.body.page === 2), 'updates companion to new page');
+assert.ok(posts.some(p => p.path.endsWith('/companion') && p.body.edition_id === 'e'.repeat(64)), 'companion receives the edition displayed on the page');
+assert.ok(posts.some(p => p.path.endsWith('/companion/message/stream') && p.body.reading_position?.page === 1 && p.body.reading_position?.edition_id === 'e'.repeat(64)), 'each turn carries the sending tab’s reading position');
 const turningContext = await browser.newContext({ viewport: { width: 1440, height: 1080 }, reducedMotion: 'no-preference' });
 await fixture(turningContext);
 const turningPage = await turningContext.newPage();
