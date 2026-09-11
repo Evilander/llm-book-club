@@ -29,6 +29,7 @@ from .analysis_stream import AnalysisStream
 from ..services.book_recall import book_recall
 from ..services.reading_scope import ReadingScope, session_scope
 
+from contextlib import aclosing
 import logging as _logging
 import re
 
@@ -171,7 +172,7 @@ class DiscussionEngine:
         )
 
         # Initialize LLM client
-        self.llm = get_llm_client()
+        self.llm = get_llm_client(db=db)
 
         # Initialize agents with memory context and adult mode overlay
         self.facilitator = FacilitatorAgent(
@@ -682,27 +683,28 @@ class DiscussionEngine:
             chunks_list: list[str] = []
             prose_stream = AnalysisStream()
             try:
-                async for delta in agent.stream_with_retrieval(
+                async with aclosing(agent.stream_with_retrieval(
                     conversation_history if conversation_history is not None else history,
                     query=retrieval_query,
-                ):
-                    chunks_list.append(delta)
-                    visible = prose_stream.feed(delta)
-                    if not visible:
-                        continue
-                    if turn_metrics.ttft_ms == 0.0:
-                        turn_metrics.record_ttft()
-                    event_seq += 1
-                    yield {
-                        "type": "message_delta",
-                        "event_id": f"evt_{event_seq}",
-                        "turn_id": turn_id,
-                        "agent_id": role,
-                        "sequence": event_seq,
-                        "role": role,
-                        "session_id": self.session.id,
-                        "delta": visible,
-                    }
+                )) as response:
+                    async for delta in response:
+                        chunks_list.append(delta)
+                        visible = prose_stream.feed(delta)
+                        if not visible:
+                            continue
+                        if turn_metrics.ttft_ms == 0.0:
+                            turn_metrics.record_ttft()
+                        event_seq += 1
+                        yield {
+                            "type": "message_delta",
+                            "event_id": f"evt_{event_seq}",
+                            "turn_id": turn_id,
+                            "agent_id": role,
+                            "sequence": event_seq,
+                            "role": role,
+                            "session_id": self.session.id,
+                            "delta": visible,
+                        }
 
             except Exception as e:
                 # Partial failure: rollback any poisoned transaction state so
@@ -793,24 +795,26 @@ class DiscussionEngine:
         close_reader_text = None
         after_dark_text = None
         with turn_metrics.track_stage("facilitator") as fac_stage:
-            async for event in stream_agent(self.facilitator, "facilitator"):
-                if event["type"] == "message_end":
-                    facilitator_text = event["content"]
-                    fac_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
-                    fac_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
-                yield event
+            async with aclosing(stream_agent(self.facilitator, "facilitator")) as response:
+                async for event in response:
+                    if event["type"] == "message_end":
+                        facilitator_text = event["content"]
+                        fac_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
+                        fac_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
+                    yield event
 
         # Stream close_reader if needed
         if include_close_reader:
             if facilitator_text is not None:
                 history.append(LLMMessage(role="assistant", content=facilitator_text))
             with turn_metrics.track_stage("close_reader") as cr_stage:
-                async for event in stream_agent(self.close_reader, "close_reader", history):
-                    if event["type"] == "message_end":
-                        close_reader_text = event["content"]
-                        cr_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
-                        cr_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
-                    yield event
+                async with aclosing(stream_agent(self.close_reader, "close_reader", history)) as response:
+                    async for event in response:
+                        if event["type"] == "message_end":
+                            close_reader_text = event["content"]
+                            cr_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
+                            cr_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
+                        yield event
 
         if self.is_adult:
             guide_history = list(history)
@@ -819,16 +823,17 @@ class DiscussionEngine:
             if close_reader_text is not None:
                 guide_history.append(LLMMessage(role="assistant", content=close_reader_text))
             with turn_metrics.track_stage("after_dark_guide") as ad_stage:
-                async for event in stream_agent(
+                async with aclosing(stream_agent(
                     self.after_dark_guide,
                     "after_dark_guide",
                     guide_history,
-                ):
-                    if event["type"] == "message_end":
-                        after_dark_text = event["content"]
-                        ad_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
-                        ad_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
-                    yield event
+                )) as response:
+                    async for event in response:
+                        if event["type"] == "message_end":
+                            after_dark_text = event["content"]
+                            ad_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
+                            ad_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
+                        yield event
 
         # Stream skeptic if needed (only via adaptive selection)
         if include_skeptic:
@@ -840,11 +845,12 @@ class DiscussionEngine:
             if after_dark_text is not None:
                 history.append(LLMMessage(role="assistant", content=after_dark_text))
             with turn_metrics.track_stage("skeptic") as sk_stage:
-                async for event in stream_agent(self.skeptic, "skeptic", history):
-                    if event["type"] == "message_end":
-                        sk_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
-                        sk_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
-                    yield event
+                async with aclosing(stream_agent(self.skeptic, "skeptic", history)) as response:
+                    async for event in response:
+                        if event["type"] == "message_end":
+                            sk_stage.tokens_in = event.get("token_usage", {}).get("input_tokens", 0)
+                            sk_stage.tokens_out = event.get("token_usage", {}).get("output_tokens", 0)
+                        yield event
 
         turn_metrics.finish()
         violations = turn_metrics.check_budgets()

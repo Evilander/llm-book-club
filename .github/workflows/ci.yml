@@ -67,6 +67,10 @@ jobs:
       - name: Real database and upload-to-discussion checks
         working-directory: apps/api
         run: python -m pytest integration -q
+      - name: Packaged ChatGPT connection against the offline provider
+        run: >-
+          docker compose -p readagain-verification -f compose.integration.yml
+          exec -T api python - < apps/api/integration/check_chatgpt_package.py
       - name: Show service failures
         if: failure()
         run: docker compose -p readagain-verification -f compose.integration.yml logs --tail 100

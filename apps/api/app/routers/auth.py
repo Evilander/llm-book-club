@@ -28,6 +28,8 @@ from ..auth.service import (
 )
 from ..db import ReadingPrefs, User, get_db
 from ..settings import settings
+from ..providers.selection import selected_provider, canonical_provider
+from .connections import chatgpt_status
 
 router = APIRouter(tags=["auth"])
 
@@ -51,12 +53,14 @@ class ProviderStatus(BaseModel):
     account_email: str | None = None
     connect_path: str | None = None
     note: str
+    active: bool = False
 
 
 class AuthStatusResponse(BaseModel):
     authenticated: bool
     user: AuthenticatedUser | None = None
     providers: list[ProviderStatus]
+    active_provider: str
 
 
 class ReadingPrefsResponse(BaseModel):
@@ -133,7 +137,7 @@ def _serialize_reading_prefs(prefs: ReadingPrefs) -> ReadingPrefsResponse:
 
 
 @router.get("/auth/status", response_model=AuthStatusResponse)
-def auth_status(
+async def auth_status(
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user),
 ):
@@ -141,18 +145,26 @@ def auth_status(
         get_google_connection(db, user_id=current_user.id) if current_user else None
     )
 
+    chatgpt = await chatgpt_status()
+    active = selected_provider(db)
     providers = [
+        ProviderStatus(
+            provider="chatgpt", label="ChatGPT", configured_auth_mode="device_code",
+            oauth_supported=True, oauth_ready=chatgpt["ready"], connected=chatgpt["connected"],
+            connect_path="/v1/auth/chatgpt/login" if chatgpt["ready"] else None,
+            note=chatgpt["note"],
+        ),
         ProviderStatus(
             provider=GOOGLE_PROVIDER,
             label="Google / Gemini",
             configured_auth_mode=settings.gemini_auth_mode.lower(),
             oauth_supported=True,
             oauth_ready=google_oauth_ready(),
-            connected=google_connection is not None,
+            connected=(google_connection is not None if settings.gemini_auth_mode.lower() == "oauth" else bool(settings.gemini_api_key)),
             account_email=google_connection.email if google_connection else None,
             connect_path="/v1/auth/google/start" if google_oauth_ready() else None,
             note=(
-                "Google OAuth is the supported no-API-key path in this app."
+                "Connect Google to use your configured Gemini cloud project."
                 if settings.gemini_auth_mode.lower() == "oauth"
                 else "Gemini is currently configured for API-key mode."
             ),
@@ -177,6 +189,13 @@ def auth_status(
         ),
     ]
 
+    if settings.local_llm_base_url or active == "local":
+        providers.append(ProviderStatus(provider="local", label="Local model", configured_auth_mode="local", oauth_supported=False, oauth_ready=False, connected=bool(settings.local_llm_base_url), note="Uses the local model endpoint configured on this server."))
+    if settings.grok_api_key or active == "grok":
+        providers.append(ProviderStatus(provider="grok", label="Grok", configured_auth_mode="api_key", oauth_supported=False, oauth_ready=False, connected=bool(settings.grok_api_key), note="Uses your configured xAI API account."))
+    for provider in providers:
+        provider.active = canonical_provider(provider.provider) == active
+
     return AuthStatusResponse(
         authenticated=current_user is not None,
         user=(
@@ -189,6 +208,7 @@ def auth_status(
             else None
         ),
         providers=providers,
+        active_provider=active,
     )
 
 

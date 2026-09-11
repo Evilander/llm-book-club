@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     app_session_ttl_hours: int = Field(24 * 30, alias="APP_SESSION_TTL_HOURS")
 
     llm_provider: str = Field("openai", alias="LLM_PROVIDER")
+    chatgpt_codex_binary: str = Field("codex", alias="CHATGPT_CODEX_BINARY")
+    chatgpt_state_dir: str = Field(".readagain/chatgpt", alias="CHATGPT_STATE_DIR")
+    chatgpt_model: str | None = Field(None, alias="CHATGPT_MODEL")
+    chatgpt_turn_timeout_seconds: int = Field(90, ge=10, le=300, alias="CHATGPT_TURN_TIMEOUT_SECONDS")
+    chatgpt_max_output_chars: int = Field(24000, ge=1000, le=100000, alias="CHATGPT_MAX_OUTPUT_CHARS")
+    chatgpt_max_input_chars: int = Field(250000, ge=1000, le=1000000, alias="CHATGPT_MAX_INPUT_CHARS")
     openai_auth_mode: str = Field("api_key", alias="OPENAI_AUTH_MODE")
     openai_api_key: str | None = Field(None, alias="OPENAI_API_KEY")
     anthropic_auth_mode: str = Field("api_key", alias="ANTHROPIC_AUTH_MODE")

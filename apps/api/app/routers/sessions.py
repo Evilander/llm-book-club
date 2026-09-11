@@ -1,5 +1,6 @@
 """Discussion session endpoints."""
 import json
+from contextlib import aclosing
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
@@ -427,14 +428,15 @@ async def stream_message(
 
     async def generate():
         try:
-            async for event in engine.stream_user_message(
+            async with aclosing(engine.stream_user_message(
                 req.content,
                 include_close_reader=req.include_close_reader,
                 adaptive=req.adaptive,
-            ):
-                event_id = event.get("event_id", "")
-                payload = json.dumps(event, ensure_ascii=False)
-                yield f"id: {event_id}\ndata: {payload}\n\n"
+            )) as events:
+                async for event in events:
+                    event_id = event.get("event_id", "")
+                    payload = json.dumps(event, ensure_ascii=False)
+                    yield f"id: {event_id}\ndata: {payload}\n\n"
         except Exception as e:
             payload = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
             yield f"data: {payload}\n\n"

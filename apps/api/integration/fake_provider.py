@@ -30,6 +30,30 @@ async def embeddings(request: Request):
     return {"data": [{"index": i, "embedding": [1.0] + [0.0] * 3071} for i, _ in enumerate(inputs)]}
 
 
+@app.post("/v1/responses")
+async def codex_response(request: Request):
+    """Exercise the real packaged app-server against an offline wire peer."""
+    payload = await request.json()
+    requests_seen.append(payload)
+    answer = '{"analysis":"The compass invites a question about trust.","citations":[]}'
+    item = {"type": "message", "id": "fixture-message", "role": "assistant", "phase": "final_answer", "status": "completed", "content": [{"type": "output_text", "text": answer, "annotations": []}]}
+    events = [
+        {"type": "response.created", "response": {"id": "fixture-response", "status": "in_progress", "output": []}},
+        {"type": "response.output_item.added", "output_index": 0, "item": {**item, "status": "in_progress", "content": []}},
+        {"type": "response.content_part.added", "item_id": item["id"], "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}},
+        *[{"type": "response.output_text.delta", "item_id": item["id"], "output_index": 0, "content_index": 0, "delta": answer[start:start + 13]} for start in range(0, len(answer), 13)],
+        {"type": "response.output_text.done", "item_id": item["id"], "output_index": 0, "content_index": 0, "text": answer},
+        {"type": "response.output_item.done", "output_index": 0, "item": item},
+        {"type": "response.completed", "response": {"id": "fixture-response", "status": "completed", "output": [item], "usage": {"input_tokens": 24, "output_tokens": 7, "total_tokens": 31}}},
+    ]
+
+    async def stream():
+        for event in events:
+            yield f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+            await asyncio.sleep(0.005)
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
 @app.post("/v1/chat/completions")
 async def complete(request: Request):
     payload = await request.json()

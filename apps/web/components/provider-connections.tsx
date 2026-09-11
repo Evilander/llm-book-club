@@ -5,10 +5,12 @@ import { BookOpen, Loader2, LogIn, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import type { AuthStatusPayload, ProviderStatus } from "@/types/api";
 import { API_BASE } from "@/lib/utils";
+import { ChatGPTConnection, connectionRequest } from "./chatgpt-connection";
 
 async function readAuthStatus(): Promise<AuthStatusPayload> {
   const response = await fetch(`${API_BASE}/v1/auth/status`, {
     credentials: "include",
+    cache: "no-store",
   });
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Failed to load auth status" }));
@@ -18,7 +20,7 @@ async function readAuthStatus(): Promise<AuthStatusPayload> {
 }
 
 function statusBadge(provider: ProviderStatus) {
-  const label = provider.oauth_supported
+  const label = provider.active ? provider.connected ? "Your reading partner" : "Selected · reconnect" : provider.configured_auth_mode === "local" ? "Local endpoint" : provider.oauth_supported
     ? provider.connected ? "Connected" : provider.oauth_ready ? "Ready to connect" : "Setup needed"
     : provider.connected ? "API key configured" : "API key needed";
   return <span className={`connection-status ${provider.connected ? "is-connected" : ""}`}>{label}</span>;
@@ -39,6 +41,7 @@ export function ProviderConnections() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busyProvider, setBusyProvider] = useState<string | null>(null);
+  const [chatgptBusy, setChatgptBusy] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     setLoading(true);
@@ -128,18 +131,29 @@ export function ProviderConnections() {
     window.location.assign(`${API_BASE}${provider.connect_path}`);
   }
 
+  async function selectProvider(provider: ProviderStatus) {
+    setBusyProvider(provider.provider);
+    try {
+      await connectionRequest("providers/active", { provider: provider.provider === "google" ? "gemini" : provider.provider });
+      await refreshStatus();
+    } catch (error) { toast.error(statusErrorMessage(error)); }
+    finally { setBusyProvider(null); }
+  }
+
   return <section className="provider-settings" aria-labelledby="connections-title">
     <div className="settings-intro"><h2 id="connections-title">Your reading partner</h2><p>Connect a model once, then settle into your book.</p></div>
     {loading ? <p className="connection-loading" role="status"><Loader2 size={16} className="animate-spin" /> Checking connections…</p> : loadError ? <div className="companion-error" role="alert"><p>{loadError}</p><button onClick={() => void refreshStatus()}>Try again</button></div> : <>
-      <div className="connection-list">{status?.providers.slice().sort((a, b) => ["openai", "anthropic", "google"].indexOf(a.provider) - ["openai", "anthropic", "google"].indexOf(b.provider)).map((provider) => <article className="connection-row" key={provider.provider}>
-        <div><h3>{provider.provider === "openai" ? "OpenAI" : provider.provider === "anthropic" ? "Claude" : "Google Gemini"}</h3>
-          <p>{provider.provider === "openai" ? "Uses your OpenAI API account. ChatGPT subscription sign-in is not connected in this version." : provider.provider === "anthropic" ? "Uses your Anthropic API account. Claude subscription sign-in is not connected in this version." : provider.configured_auth_mode === "oauth" ? "Connect your Google account to read with Gemini." : "Gemini is set up to use an API key."}</p>
+      <div className="connection-list">{status?.providers.slice().sort((a, b) => ["chatgpt", "openai", "anthropic", "google", "grok", "local"].indexOf(a.provider) - ["chatgpt", "openai", "anthropic", "google", "grok", "local"].indexOf(b.provider)).map((provider) => <article className="connection-row" key={provider.provider}>
+        <div><h3>{provider.provider === "anthropic" ? "Claude" : provider.label}</h3>
+          <p>{provider.provider === "openai" ? "Uses your OpenAI API account, billed separately from ChatGPT." : provider.provider === "anthropic" ? "Uses your Anthropic API account. Claude subscription sign-in is not connected in this version." : provider.note}</p>
           {provider.account_email ? <p className="connection-email">{provider.account_email}</p> : null}
-          {provider.provider === "google" && provider.oauth_ready ? <div className="connection-actions"><button className="reading-button secondary" disabled={!!busyProvider} onClick={() => handleConnect(provider)}>{provider.connected ? "Reconnect Google" : "Connect Google"}<LogIn size={14} /></button>{provider.connected ? <button className="text-link" disabled={!!busyProvider} onClick={() => void handleDisconnectGoogle()}>Disconnect</button> : null}</div> : null}
+          {provider.provider === "chatgpt" ? <ChatGPTConnection provider={provider} onChange={refreshStatus} onBusyChange={setChatgptBusy} disabled={!!busyProvider} /> : null}
+          {provider.provider === "google" && provider.oauth_ready && provider.configured_auth_mode === "oauth" ? <div className="connection-actions"><button className="reading-button secondary" disabled={!!busyProvider || chatgptBusy} onClick={() => handleConnect(provider)}>{provider.connected ? "Reconnect Google" : "Connect Google"}<LogIn size={14} /></button>{provider.connected ? <button className="text-link" disabled={!!busyProvider || chatgptBusy} onClick={() => void handleDisconnectGoogle()}>Disconnect</button> : null}</div> : null}
+          {provider.provider !== "chatgpt" && provider.connected && !provider.active ? <div className="connection-actions"><button className="reading-button secondary" disabled={!!busyProvider || chatgptBusy} onClick={() => void selectProvider(provider)}>Read with {provider.provider === "anthropic" ? "Claude" : provider.label}</button></div> : null}
         </div>{statusBadge(provider)}
       </article>)}</div>
-      {status?.authenticated && status.user ? <div className="settings-account"><p>Signed in as {status.user.display_name || status.user.email}</p><button className="text-link" disabled={!!busyProvider} onClick={() => void handleLogout()}>Sign out <LogOut size={14} /></button></div> : null}
+      {status?.authenticated && status.user ? <div className="settings-account"><p>Signed in as {status.user.display_name || status.user.email}</p><button className="text-link" disabled={!!busyProvider || chatgptBusy} onClick={() => void handleLogout()}>Sign out <LogOut size={14} /></button></div> : null}
     </>}
-    <div className="settings-memory"><BookOpen size={22} strokeWidth={1.3} /><div><h3>A memory for each book</h3><p>Your conversations and margin questions are saved in this library. Your partner recalls relevant earlier thoughts as you read, so you can return to an idea in another chapter—even when you change models.</p></div></div>
+    <div className="settings-memory"><BookOpen size={22} strokeWidth={1.3} /><div><h3>A memory for each book</h3><p>Your conversations and margin questions are saved in this library. Your partner recalls relevant earlier thoughts as you read, so you can return to an idea in another chapter—even when you change models. Book memory stays with this library; connecting ChatGPT does not import your other chats.</p></div></div>
   </section>;
 }

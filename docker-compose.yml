@@ -77,6 +77,7 @@ services:
         condition: service_healthy
     volumes:
       - book_storage:/app/storage
+      - chatgpt_state:/app/chatgpt
       - ${BOOKS_DIR:-./books}:/books:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
@@ -110,6 +111,7 @@ services:
         condition: service_healthy
     volumes:
       - book_storage:/app/storage
+      - chatgpt_state:/app/chatgpt
       - ${BOOKS_DIR:-./books}:/books:ro
 
   web:
@@ -165,3 +167,4 @@ volumes:
   db_data:
   book_storage:
   ollama_data:
+  chatgpt_state:

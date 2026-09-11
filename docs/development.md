@@ -41,6 +41,14 @@ docker compose -p readagain-verification -f compose.integration.yml --profile ap
 
 The verification stack uses temporary database storage and generated test documents. Its local HTTP provider produces deterministic embeddings and replies; no API keys or real books are used. Each database test creates and removes only its own randomly named `readagain_test_*` database. Set `TEST_DATABASE_URL` only to an isolated server with database-creation permission.
 
+Check the ChatGPT runtime packaged in the API image against the same offline provider:
+
+```bash
+docker compose -p readagain-verification -f compose.integration.yml exec -T api python - < apps/api/integration/check_chatgpt_package.py
+```
+
+This runs two independent synthetic reading turns through the native App Server. It verifies streaming, usage, context isolation, native rollout storage, and the exposed tool set without signing in or accessing a paid model. See [ChatGPT connection](chatgpt-connection.md) for the supported runtime version and live setup.
+
 The workflow tests upload EPUB, PDF, and TXT through the API, wait for the real RQ worker, open the reader, validate margin quotes, stream a discussion, open citations, and check that an earlier thought reaches a later session. They also return from a later discussion to an earlier page and inspect the provider's HTTP requests for unread text or later thoughts. The fixture provider's loopback port 59000 exposes test-only capture/reset endpoints; it is not part of the production app. Database tests cover fresh and concurrent startup, rollback after failures, upgrades from the old stamped schema, explicit legacy adoption, and both retrieval branches. See [grounding and reading boundaries](grounding-and-reading-boundaries.md) for the citation, Unicode, and stream contracts.
 
 For UI checks:

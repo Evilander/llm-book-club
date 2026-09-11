@@ -279,7 +279,7 @@ async def run_intelligent_ingestion_pipeline(
 
         if use_intelligent_chunking and book.total_tokens_estimate > 10000:
             # Use intelligent chunking for larger texts
-            llm_client = get_llm_client()
+            llm_client = get_llm_client(db=db)
             chunker = IntelligentChunker(llm_client)
 
             logger.info("Analyzing book structure...")
@@ -512,6 +512,11 @@ def run_intelligent_ingestion_sync(
     Synchronous wrapper for intelligent ingestion pipeline (for RQ worker).
     """
     import asyncio
-    return asyncio.run(run_intelligent_ingestion_pipeline(
-        book_id, file_data, filename, use_intelligent_chunking
-    ))
+    from ..providers.llm.codex_runtime import close_codex_runtime
+
+    async def run():
+        try:
+            return await run_intelligent_ingestion_pipeline(book_id, file_data, filename, use_intelligent_chunking)
+        finally:
+            await close_codex_runtime()
+    return asyncio.run(run())

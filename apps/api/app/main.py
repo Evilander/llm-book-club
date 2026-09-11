@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from .routers import health, ingest, sessions, tts, memory, library, admin, auth, companion
+from .routers import health, ingest, sessions, tts, memory, library, admin, auth, companion, connections
+from .providers.llm.codex_runtime import close_codex_runtime
 from .db.init_db import init_db
 from .settings import settings
 from .rate_limit import limiter
@@ -15,7 +16,10 @@ from .rate_limit import limiter
 async def lifespan(app: FastAPI):
     # Initialize database on startup
     init_db()
-    yield
+    try:
+        yield
+    finally:
+        await close_codex_runtime()
 
 
 app = FastAPI(title="ReadAgain API", version="1.0.0", lifespan=lifespan)
@@ -46,4 +50,5 @@ app.include_router(tts.router, prefix="/v1")
 app.include_router(library.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
+app.include_router(connections.router, prefix="/v1")
 app.include_router(memory.router)

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -14,6 +15,80 @@ from starlette.testclient import TestClient
 from app.db.models import Base, ProviderCredential, ReadingPrefs, User
 from app.providers.llm.gemini import GeminiClient
 from app.settings import settings
+
+SETTINGS_HEADERS = {"Origin": "http://localhost:3000", "X-ReadAgain-Settings": "1"}
+
+
+@pytest.fixture
+def chatgpt_peer(monkeypatch):
+    peer = MagicMock()
+    peer.available = True
+    peer.account = AsyncMock(return_value={"connected": True, "plan": "plus"})
+    peer.begin_login = AsyncMock(return_value={"login_id": "fixture-login", "state": "pending", "user_code": "TEST-CODE", "verification_url": "https://auth.openai.com/codex/device", "deadline": time.monotonic() + 600})
+    peer.login_status = AsyncMock(return_value={"login_id": "fixture-login", "state": "completed", "deadline": time.monotonic() + 600})
+    peer.logout = AsyncMock()
+    monkeypatch.setattr("app.routers.connections.get_codex_runtime", lambda: peer)
+    return peer
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/v1/auth/chatgpt/login", {}),
+    ("/v1/auth/chatgpt/login/status", {"login_id": "fixture-login"}),
+    ("/v1/auth/chatgpt/login/cancel", {"login_id": "fixture-login"}),
+    ("/v1/auth/chatgpt/disconnect", {}),
+    ("/v1/providers/active", {"provider": "chatgpt"}),
+])
+def test_connection_changes_require_first_party_origin_and_header(client, chatgpt_peer, monkeypatch, path, body):
+    monkeypatch.setattr(settings, "cors_origins", "*")
+    for headers in [{}, {"Origin": "http://localhost:3000"}, {"Origin": "https://example.com", "X-ReadAgain-Settings": "1"}, {"Origin": "null", "X-ReadAgain-Settings": "1"}]:
+        assert client.post(path, json=body, headers=headers).status_code == 403
+    chatgpt_peer.begin_login.assert_not_awaited()
+    chatgpt_peer.logout.assert_not_awaited()
+
+
+def test_device_code_flow_never_returns_tokens_and_is_not_cached(client, chatgpt_peer):
+    response = client.post("/v1/auth/chatgpt/login", json={}, headers=SETTINGS_HEADERS)
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["user_code"] == "TEST-CODE"
+    assert "deadline" not in response.json()
+    response = client.post("/v1/auth/chatgpt/login/status", json={"login_id": "fixture-login"}, headers=SETTINGS_HEADERS)
+    assert response.json()["state"] == "completed" and response.json()["user_code"] is None
+    assert "token" not in response.text
+
+
+def test_selection_persists_and_disconnect_keeps_chatgpt_selected(client, integration_db, chatgpt_peer):
+    from app.providers.llm.factory import get_llm_client
+    from app.providers.llm.chatgpt import ChatGPTClient
+    from app.providers.selection import selected_provider
+    response = client.post("/v1/providers/active", json={"provider": "chatgpt"}, headers=SETTINGS_HEADERS)
+    assert response.json() == {"active_provider": "chatgpt"}
+    integration_db.expire_all()
+    assert selected_provider(integration_db) == "chatgpt"
+    assert isinstance(get_llm_client(db=integration_db), ChatGPTClient)
+    status = client.get("/v1/auth/status").json()
+    assert next(item for item in status["providers"] if item["provider"] == "chatgpt")["active"] is True
+    assert client.post("/v1/auth/chatgpt/disconnect", json={}, headers=SETTINGS_HEADERS).status_code == 200
+    chatgpt_peer.logout.assert_awaited_once()
+    assert selected_provider(integration_db) == "chatgpt"
+
+
+def test_disconnected_provider_cannot_replace_current_selection(client, integration_db, chatgpt_peer):
+    from app.providers.selection import selected_provider
+    previous = selected_provider(integration_db)
+    chatgpt_peer.account.return_value = {"connected": False, "plan": None}
+    response = client.post("/v1/providers/active", json={"provider": "chatgpt"}, headers=SETTINGS_HEADERS)
+    assert response.status_code == 409
+    assert selected_provider(integration_db) == previous
+
+
+def test_gemini_selection_treats_oauth_case_insensitively(client, monkeypatch):
+    monkeypatch.setattr(settings, "gemini_auth_mode", "OAuth")
+    monkeypatch.setattr(settings, "gemini_api_key", None)
+    monkeypatch.setattr("app.auth.service.get_current_user", lambda *_: User(id="fixture-user", email="fixture@example.com"))
+    monkeypatch.setattr("app.auth.service.get_google_connection", lambda *args, **kwargs: object())
+    response = client.post("/v1/providers/active", json={"provider": "gemini"}, headers=SETTINGS_HEADERS)
+    assert response.json() == {"active_provider": "gemini"}
 
 
 @pytest.fixture
