@@ -292,7 +292,7 @@ class Chunk(Base):
         Index("ix_chunks_section_order", "section_id", "order_index"),
         # HNSW index on embedding is created via Alembic migration (001) using raw SQL:
         #   CREATE INDEX ix_chunks_embedding_hnsw ON chunks
-        #   USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)
+        #   USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
         # A generated tsvector column (text_search) and GIN index are also managed there.
     )
 

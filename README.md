@@ -11,6 +11,8 @@ ReadAgain is a reading, listening, and discussion room for the books you already
 
 Built for local-first reading workflows, the app combines fast ingestion, hybrid retrieval, streaming responses, and long-term book memory so discussions keep their thread across sessions.
 
+See [development and verification](docs/development.md) for the tested installation, database recovery, and automated checks, and [product direction](docs/product-direction.md) for the remaining work.
+
 ## Features
 
 - **Lite Reader** with five paper finishes, four fonts, adjustable Bionic text, saved reading position, keyboard navigation, and mobile swipe.
@@ -29,8 +31,7 @@ Built for local-first reading workflows, the app combines fast ingestion, hybrid
 ### Prerequisites
 
 - Docker
-- An API key for at least one hosted model provider:
-  `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
+- An OpenAI API key for the default chat and embedding configuration. Other chat providers also need a configured embedding provider.
 
 ### 1. Copy environment files
 
@@ -48,18 +49,18 @@ Copy-Item apps/web/.env.local.example apps/web/.env.local
 
 ### 2. Add your API key
 
-Edit `apps/api/.env` and set at least one provider key:
+Edit `apps/api/.env`. The default uses OpenAI for both discussion and book embeddings:
 
 ```env
 OPENAI_API_KEY=your-key-here
-# or
-ANTHROPIC_API_KEY=your-key-here
 ```
+
+To discuss with Claude, also set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY`. Keep OpenAI configured for embeddings, or explicitly configure another embedding model that returns 3,072 dimensions. A Claude key alone does not prepare books in the default setup.
 
 ### 3. Start the stack
 
 ```bash
-docker compose up --build
+docker compose up --build --wait
 ```
 
 ### 4. Open the app

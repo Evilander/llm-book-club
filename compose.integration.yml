@@ -1,0 +1,79 @@
+# Isolated integration stack; no personal library, credentials, or paid providers.
+x-api: &test-api
+  build: ./apps/api
+  image: readagain-api:integration
+  environment: &test-environment
+    DATABASE_URL: postgresql+psycopg://readagain_test:integration-only@db:5432/readagain_integration
+    REDIS_URL: redis://redis:6379/0
+    APP_ENV: test
+    LLM_PROVIDER: local
+    LOCAL_LLM_BASE_URL: http://provider:9000/v1
+    EMBEDDINGS_PROVIDER: local
+    LOCAL_EMBEDDINGS_BASE_URL: http://provider:9000/v1
+    MAX_HISTORY_MESSAGES: 2
+  profiles: [app]
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: readagain_test
+      POSTGRES_PASSWORD: integration-only
+      POSTGRES_DB: readagain_integration
+    ports:
+      - "127.0.0.1:${TEST_POSTGRES_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U readagain_test -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  provider:
+    <<: *test-api
+    command: ["uvicorn", "fake_provider:app", "--app-dir", "/fixtures", "--host", "0.0.0.0", "--port", "9000"]
+    volumes:
+      - ./apps/api/integration/fake_provider.py:/fixtures/fake_provider.py:ro
+  migrate:
+    <<: *test-api
+    command: ["python", "-m", "app.db.init_db"]
+    depends_on:
+      db:
+        condition: service_healthy
+  api:
+    <<: *test-api
+    ports:
+      - "127.0.0.1:${TEST_API_PORT:-58000}:8000"
+    volumes:
+      - test_uploads:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      provider:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 2s
+      timeout: 6s
+      retries: 30
+  worker:
+    <<: *test-api
+    command: ["python", "run_worker.py"]
+    volumes:
+      - test_uploads:/app/storage
+    depends_on:
+      api:
+        condition: service_healthy
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${TEST_REDIS_PORT:-56379}:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  test_uploads:

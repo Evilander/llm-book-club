@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
-        ON chunks USING hnsw (embedding vector_cosine_ops)
+        ON chunks USING hnsw ((embedding::halfvec(3072)) halfvec_cosine_ops)
         WITH (m = 16, ef_construction = 64)
         """
     )
