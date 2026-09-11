@@ -71,6 +71,7 @@ def chunk_text(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     overlap: int = DEFAULT_OVERLAP,
     source_ref_base: str | None = None,
+    preserve_whitespace: bool = False,
 ) -> list[TextChunk]:
     """
     Split text into overlapping chunks with position tracking.
@@ -85,17 +86,21 @@ def chunk_text(
     Returns:
         List of TextChunk objects
     """
+    def make_chunk(start: int, end: int, index: int) -> TextChunk:
+        raw = text[start:end]
+        content = raw if preserve_whitespace else raw.strip()
+        if not preserve_whitespace:
+            start += len(raw) - len(raw.lstrip())
+        return TextChunk(text=content, char_start=start, char_end=start + len(content),
+                         absolute_char_start=section_char_start + start,
+                         absolute_char_end=section_char_start + start + len(content),
+                         order_index=index, source_ref=source_ref_base)
+
+    if not text.strip():
+        return []
     if len(text) <= chunk_size:
         return [
-            TextChunk(
-                text=text.strip(),
-                char_start=0,
-                char_end=len(text),
-                absolute_char_start=section_char_start,
-                absolute_char_end=section_char_start + len(text),
-                order_index=0,
-                source_ref=source_ref_base,
-            )
+            make_chunk(0, len(text), 0)
         ]
 
     chunks = []
@@ -113,20 +118,10 @@ def chunk_text(
             # Find a good break point
             end_pos = _find_break_point(text, end_target)
 
-        chunk_text_content = text[pos:end_pos].strip()
+        chunk = make_chunk(pos, end_pos, chunk_idx)
 
-        if len(chunk_text_content) >= MIN_CHUNK_SIZE or not chunks:
-            chunks.append(
-                TextChunk(
-                    text=chunk_text_content,
-                    char_start=pos,
-                    char_end=end_pos,
-                    absolute_char_start=section_char_start + pos,
-                    absolute_char_end=section_char_start + end_pos,
-                    order_index=chunk_idx,
-                    source_ref=source_ref_base,
-                )
-            )
+        if chunk.text.strip() and (len(chunk.text) >= MIN_CHUNK_SIZE or not chunks or end_pos == len(text)):
+            chunks.append(chunk)
             chunk_idx += 1
 
         # Move to next chunk position (with overlap)
@@ -145,6 +140,7 @@ def chunk_sections(
     sections: list[ExtractedSection],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     overlap: int = DEFAULT_OVERLAP,
+    preserve_whitespace: bool = False,
 ) -> list[ChunkedSection]:
     """
     Chunk all sections of a book.
@@ -174,6 +170,7 @@ def chunk_sections(
             chunk_size=chunk_size,
             overlap=overlap,
             source_ref_base=source_ref,
+            preserve_whitespace=preserve_whitespace,
         )
 
         result.append(ChunkedSection(section=section, chunks=chunks))

@@ -14,6 +14,8 @@ from ..providers.embeddings.factory import get_embeddings_client
 from ..providers.embeddings.space import configured_space, storage_batch
 from ..providers.embeddings.persistence import register_space
 from ..providers.llm.factory import get_llm_client
+from ..services.reader_layout import build_reading_layout
+from ..services.reading_scope import load_reading
 from .extractor import extract_text
 from .chunker import chunk_sections, chunk_text, estimate_tokens, estimate_reading_time
 from .intelligent_chunker import IntelligentChunker, StructureAnalyzer
@@ -44,6 +46,22 @@ def _merge_book_metadata(existing: dict | None, extracted: dict | None) -> dict:
     merged = dict(existing or {})
     merged.update(extracted or {})
     return merged
+
+
+def _record_reading_layout(db: Session, book: Book, extracted) -> None:
+    if not extracted.blocks:
+        return
+    try:
+        reading, chunks = load_reading(db, book.id)
+        layout = build_reading_layout(extracted.full_text, extracted.blocks, chunks, reading)
+    except Exception:
+        # Text and embeddings are already committed. Optional typography must
+        # not make a readable book fail ingestion or leave an aborted transaction.
+        db.rollback()
+        logger.warning("EPUB typography could not be prepared; using plain text")
+        return
+    if layout is not None:
+        book.metadata_json = {**(book.metadata_json or {}), "reading_layout": layout}
 
 
 def validate_embeddings(embeddings: list[list[float]], expected_count: int) -> list[list[float]]:
@@ -113,7 +131,7 @@ async def run_ingestion_pipeline(
         _write_book_stage(db, book, "setting_type")
 
         # Step 2: Chunk sections
-        chunked = chunk_sections(extracted.sections)
+        chunked = chunk_sections(extracted.sections, preserve_whitespace=extracted.file_type == "epub")
         _write_book_stage(db, book, "sewing")
 
         # Step 3: Create section and chunk records
@@ -177,6 +195,7 @@ async def run_ingestion_pipeline(
 
         db.commit()
 
+        _record_reading_layout(db, book, extracted)
         _write_book_stage(db, book, "drying")
         _write_book_stage(db, book, "shelved", status=IngestStatus.COMPLETED)
 

@@ -215,7 +215,21 @@ button:disabled { cursor: not-allowed; }
 .lite-reader .lite-orn { color: inherit; opacity: .5; margin: 24px 0 30px; }
 .lite-reader .lite-prose { max-width: var(--lite-measure); margin: auto; font-size: var(--lite-fs); line-height: var(--lite-lh); }
 .lite-reader .lite-prose p { text-align: left; text-indent: 0; margin-bottom: 1.1em; }
-.lite-reader .lite-prose p:first-child::first-letter { float: none; font-size: inherit; line-height: inherit; padding: 0; font-weight: inherit; }
+.lite-reader .lite-prose .prose-heading { font-family: var(--font-display), Georgia, serif; font-weight: 500; font-style: normal; line-height: 1.3; margin: 1.5em 0 .8em; color: inherit; }
+.lite-reader .lite-prose h1.prose-heading { font-size: 1.65em; }
+.lite-reader .lite-prose h2.prose-heading { font-size: 1.4em; }
+.lite-reader .lite-prose h3.prose-heading { font-size: 1.2em; }
+.lite-reader .lite-prose .prose-heading:first-child { margin-top: 0; }
+.lite-reader .lite-prose .prose-quote { margin: 1.1em 1em; font-size: .95em; }
+.lite-reader .lite-prose .prose-preformatted { margin: 1.1em 0; white-space: pre-wrap; overflow-wrap: anywhere; font: .88em/1.65 ui-monospace, monospace; }
+.lite-reader .lite-prose .prose-list { margin: 1em 0; padding-left: .4em; }
+.lite-reader .lite-prose .prose-list_item { display: grid; grid-template-columns: minmax(1em, max-content) minmax(0, 1fr); gap: .5em; margin: .3em 0; }
+.prose-list-label { text-align: right; white-space: nowrap; }
+.lite-reader .lite-prose .prose-continued:first-child { margin-top: 0; }
+.lite-prose .prose-line-break { white-space: pre; }
+.lite-prose code { font: .88em ui-monospace, monospace; }
+.lite-prose em { font-style: italic; }
+.lite-prose strong { font-weight: 700; }
 .lite-reader .lite-folio { justify-content: center; margin-top: 36px; border: none; color: inherit; opacity: .6; font: 13px/1.5 var(--font-body), Georgia, serif; }
 .paper-turn-sheet { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; backface-visibility: hidden; transform-origin: left center; animation: paper-turn-forward 620ms cubic-bezier(.35,.05,.25,1) both; box-shadow: 20px 8px 35px -15px #362e2450; }
 .paper-turn-sheet.turn-left { transform-origin: right center; animation-name: paper-turn-back; }
@@ -435,7 +449,6 @@ button:disabled { cursor: not-allowed; }
   .settings-memory { padding: 24px; }
 }
 .lite-reader .lite-page, .paper-turn-sheet { min-height: max(500px, calc(100dvh - 290px)); }
-.lite-reader .lite-prose p:first-child::first-letter { color: inherit; font-style: normal; font-family: inherit; }
 .lamplight-room:not(.after-dark) .cast-voice.ink-ellis { color: #756847; }
 .lamplight-room:not(.after-dark) .room-clock { background: transparent; border: 0; box-shadow: none; }
 @media (max-width: 560px) {
@@ -455,7 +468,6 @@ button:disabled { cursor: not-allowed; }
 .bionic-setting .lite-rail-toggle.is-on { background: var(--reading-green); border-color: var(--reading-green); }
 .bionic-setting .lite-rail-toggle.is-on .lite-rail-knob { left: 21px; }
 
-.lite-reader[class] .lite-prose p:first-of-type::first-letter { color: inherit; }
 
 /* Connection setup stays over the current page, including inside the mobile drawer. */
 .connection-dialog-scrim { z-index: 90; }

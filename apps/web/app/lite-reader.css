@@ -229,18 +229,6 @@
     text-indent: 1.4em;
   }
   .lite-prose p:first-of-type { text-indent: 0; }
-  .lite-prose p:first-of-type::first-letter {
-    font-family: var(--font-display), Georgia, serif;
-    font-style: italic;
-    font-weight: 600;
-    font-size: 3.2em;
-    float: left;
-    line-height: 0.86;
-    padding: 0.08em 0.12em 0 0;
-    color: var(--ink-sable);
-  }
-  .lite-reader.lite-cream-daylight .lite-prose p:first-of-type::first-letter { color: #5b1a2a; }
-  .lite-reader.lite-paper-white .lite-prose p:first-of-type::first-letter { color: #2a3540; }
 
   .lite-prose.is-focus b.fr-b { font-weight: 700; }
   .lite-prose.is-focus span.fr-r { font-weight: 400; }
