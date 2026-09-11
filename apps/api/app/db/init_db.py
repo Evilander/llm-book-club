@@ -1,101 +1,113 @@
-"""Initialize the database with all tables and extensions.
-
-Prefers running Alembic migrations (so that indexes, generated columns,
-and future schema changes are applied consistently). Falls back to
-SQLAlchemy ``create_all`` if Alembic is not installed or if the migration
-runner fails for any reason (e.g. missing alembic.ini in a test environment).
-"""
+"""Initialize or migrate Postgres atomically; a broken schema must stop startup."""
 import logging
+import argparse
 from pathlib import Path
 
-from sqlalchemy import text
+from alembic import command
+from alembic.config import Config
+from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from sqlalchemy import inspect, text
+
 from .engine import engine
 from .models import Base
+from .search_schema import install_search_objects, verify_search_objects
 
 logger = logging.getLogger(__name__)
+SCHEMA_LOCK = 732_041_907
 
 
-def _run_alembic_upgrade() -> bool:
-    """Attempt to run ``alembic upgrade head`` programmatically.
-
-    Returns True on success, False if Alembic is unavailable or fails.
-    """
-    try:
-        from alembic.config import Config
-        from alembic import command
-    except ImportError:
-        logger.warning("alembic package not installed -- skipping migrations")
-        return False
-
-    # Locate alembic.ini relative to the project root (apps/api/).
-    api_root = Path(__file__).resolve().parents[2]  # apps/api/
+def migration_config(connection=None) -> Config:
+    api_root = Path(__file__).resolve().parents[2]
     ini_path = api_root / "alembic.ini"
-
-    if not ini_path.exists():
-        logger.warning("alembic.ini not found at %s -- skipping migrations", ini_path)
-        return False
-
-    try:
-        alembic_cfg = Config(str(ini_path))
-        # Override script_location to an absolute path so it works
-        # regardless of the process working directory.
-        alembic_cfg.set_main_option(
-            "script_location", str(api_root / "alembic")
-        )
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Alembic migrations applied successfully")
-        return True
-    except Exception:
-        logger.exception("Alembic migration failed -- falling back to create_all")
-        return False
+    if not ini_path.is_file() or not (api_root / "alembic/versions").is_dir():
+        raise RuntimeError("Database migrations are missing from this installation.")
+    config = Config(str(ini_path))
+    config.set_main_option("script_location", str(api_root / "alembic"))
+    if connection is not None:
+        config.attributes["connection"] = connection
+    return config
 
 
-def init_db():
-    """Create all tables and enable required extensions.
+def validate_unversioned_library(connection) -> None:
+    """Accept only the known ORM layout; never guess a partial legacy version."""
+    schema = inspect(connection)
+    tables = set(schema.get_table_names())
+    problems = []
+    for name, table in Base.metadata.tables.items():
+        if name not in tables:
+            if name != "reading_prefs":  # Migration 007 creates this known omission.
+                problems.append(f"missing table {name}")
+            continue
+        columns = {column['name']: column for column in schema.get_columns(name)}
+        for expected in table.columns:
+            actual = columns.get(expected.name)
+            if actual is None:
+                problems.append(f"missing column {name}.{expected.name}")
+                continue
+            expected_type = expected.type.compile(dialect=connection.dialect).upper()
+            actual_type = actual['type'].compile(dialect=connection.dialect).upper()
+            # PostgreSQL reflects SQLAlchemy's unqualified FLOAT as DOUBLE PRECISION.
+            expected_type = expected_type.replace("DOUBLE PRECISION", "FLOAT")
+            actual_type = actual_type.replace("DOUBLE PRECISION", "FLOAT")
+            if expected_type != actual_type or expected.nullable != actual['nullable']:
+                problems.append(f"incompatible column {name}.{expected.name}")
+            if getattr(expected.type, 'enums', None) != getattr(actual['type'], 'enums', None):
+                problems.append(f"incompatible enum {name}.{expected.name}")
+        primary_key = set(schema.get_pk_constraint(name)['constrained_columns'])
+        if primary_key != {column.name for column in table.primary_key}:
+            problems.append(f"incompatible primary key {name}")
+    if problems:
+        raise RuntimeError("Legacy schema does not match this release; no changes were applied: " + "; ".join(problems[:12]))
 
-    1. Enable the pgvector extension.
-    2. If the DB is empty (no ``books`` table yet), bootstrap from the ORM
-       so that downstream migrations don't try to touch tables that haven't
-       been created yet. Stamp Alembic at head once tables exist.
-    3. Otherwise run ``alembic upgrade head`` normally so future schema
-       changes apply on top of an existing database.
-    4. If Alembic isn't available at all, fall back to ``create_all``.
-    """
-    with engine.connect() as conn:
-        # Enable pgvector extension
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
 
-        # Detect whether this looks like a fresh database.
-        result = conn.execute(text(
-            "SELECT to_regclass('public.books') IS NOT NULL"
-        )).scalar()
-        is_fresh = not bool(result)
+def init_db(*, adopt_unversioned: bool = False):
+    if engine.dialect.name != "postgresql":
+        raise RuntimeError("ReadAgain requires PostgreSQL with pgvector for its library.")
 
-    if is_fresh:
-        # Fresh DB: create tables from the ORM, then stamp Alembic at head
-        # so subsequent migrations have a known starting point.
-        logger.info("Fresh database detected -- bootstrapping via ORM")
-        Base.metadata.create_all(bind=engine)
-        try:
-            from alembic.config import Config
-            from alembic import command
-            api_root = Path(__file__).resolve().parents[2]
-            cfg = Config(str(api_root / "alembic.ini"))
-            cfg.set_main_option("script_location", str(api_root / "alembic"))
-            command.stamp(cfg, "head")
-            logger.info("Alembic stamped at head")
-        except Exception:
-            logger.exception("Could not stamp Alembic -- continuing without")
-        return
+    # API processes and the migration service may start together. One transaction
+    # owns schema creation, derived indexes, and the revision stamp as a unit.
+    with engine.begin() as connection:
+        connection.execute(text("SET LOCAL lock_timeout = '60s'"))
+        connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": SCHEMA_LOCK})
+        config = migration_config(connection)
+        heads = ScriptDirectory.from_config(config).get_heads()
+        if len(heads) != 1:
+            raise RuntimeError("Database migrations must have exactly one head.")
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        version = connection.execute(text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")).scalar_one()
+        if tuple(int(part) for part in version.split('.')[:2]) < (0, 8):
+            raise RuntimeError("ReadAgain requires pgvector 0.8 or newer. Upgrade the extension before restarting.")
 
-    # Existing DB: run migrations as usual.
-    migrated = _run_alembic_upgrade()
-    if not migrated:
-        logger.info("Falling back to Base.metadata.create_all()")
-        Base.metadata.create_all(bind=engine)
+        revisions = MigrationContext.configure(connection).get_current_heads()
+        tables = set(inspect(connection).get_table_names()) - {"alembic_version"}
+        if not revisions:
+            if tables & set(Base.metadata.tables):
+                # Old create_all installs sometimes have data but no revision.
+                # Guessing their version could mark missing columns as migrated.
+                if not adopt_unversioned:
+                    raise RuntimeError(
+                        "This library has tables but no migration revision. Back up the database "
+                        "and follow the legacy-library recovery instructions before restarting."
+                    )
+                validate_unversioned_library(connection)
+                command.stamp(config, "006")
+                command.upgrade(config, "head")
+            else:
+                Base.metadata.create_all(bind=connection)
+                install_search_objects(connection)
+                command.stamp(config, heads[0])
+        else:
+            command.upgrade(config, "head")
+
+        verify_search_objects(connection)
+        if MigrationContext.configure(connection).get_current_heads() != tuple(heads):
+            raise RuntimeError("Database migration did not reach the expected revision.")
+    logger.info("Database schema and retrieval indexes are ready")
 
 
 if __name__ == "__main__":
-    init_db()
+    parser = argparse.ArgumentParser(description="Initialize or migrate the library database.")
+    parser.add_argument("--adopt-unversioned", action="store_true", help="After a backup, validate and adopt an unversioned library with this release's known schema.")
+    init_db(adopt_unversioned=parser.parse_args().adopt_unversioned)
     print("Database initialized successfully.")

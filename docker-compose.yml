@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: bookclub
       POSTGRES_DB: bookclub
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,16 +18,33 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: ./apps/api
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
+    command: python -m app.db.init_db
+    environment:
+      - DATABASE_URL=postgresql+psycopg://bookclub:bookclub@db:5432/bookclub
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./apps/api/.env
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: ./apps/api
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
     environment:
       - DATABASE_URL=postgresql+psycopg://bookclub:bookclub@db:5432/bookclub
       - REDIS_URL=redis://redis:6379/0
@@ -37,8 +54,10 @@ services:
     env_file:
       - ./apps/api/.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -46,10 +65,18 @@ services:
     volumes:
       - book_storage:/app/storage
       - ${BOOKS_DIR:-./books}:/books:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
 
   worker:
     build:
       context: ./apps/api
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
     command: python run_worker.py
     environment:
       - DATABASE_URL=postgresql+psycopg://bookclub:bookclub@db:5432/bookclub
@@ -60,6 +87,8 @@ services:
     env_file:
       - ./apps/api/.env
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -74,9 +103,10 @@ services:
     env_file:
       - ./apps/web/.env.local
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
   # VibeVoice Realtime TTS (OpenAI-compatible)
   # Start with: docker compose --profile gpu up
@@ -85,7 +115,7 @@ services:
     build:
       context: ./vibevoice
     ports:
-      - "8880:8880"
+      - "127.0.0.1:8880:8880"
     volumes:
       - ./vibevoice/models:/home/ubuntu/app/models
     environment:
@@ -106,7 +136,7 @@ services:
     profiles: ["local"]
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     healthcheck:

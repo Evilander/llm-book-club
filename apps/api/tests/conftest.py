@@ -6,6 +6,7 @@ and provides reusable fixtures for the test database and sample data.
 import os
 import sys
 import uuid
+import json
 
 import pytest
 
@@ -39,6 +40,12 @@ class _FakeVector(_SAText):
     def __init__(self, dim: int = 3072, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dim = dim
+
+    def bind_processor(self, dialect):
+        return lambda value: json.dumps(value) if value is not None else None
+
+    def result_processor(self, dialect, coltype):
+        return lambda value: json.loads(value) if value is not None else None
 
 
 class _FakeModule:

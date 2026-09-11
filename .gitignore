@@ -47,6 +47,7 @@ storage/
 *.sqlite3
 *.sqlite
 *.db
+*.dump
 book_storage/
 /books/*
 !/books/.gitkeep

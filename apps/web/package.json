@@ -7,6 +7,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
+    "test:stream": "node scripts/check-event-stream.mjs",
+    "test:reader": "node scripts/check-reading-experience.mjs",
     "check:classifier": "npx -y tsx scripts/check-classifier.mjs"
   },
   "dependencies": {
@@ -34,6 +36,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.27",
+    "playwright": "1.63.0",
     "postcss": "^8.5.14",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.2"

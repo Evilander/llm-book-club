@@ -1,0 +1,2 @@
+# Only needed for in-process local embeddings or reranking.
+sentence-transformers>=3.0.0

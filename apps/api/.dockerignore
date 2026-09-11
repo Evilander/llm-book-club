@@ -3,6 +3,13 @@ __pycache__
 .venv
 venv
 .env
+.env.*
+storage
+book_storage
+*.sqlite*
+*.db
+*.pem
+*.key
 *.md
 .git
 .pytest_cache

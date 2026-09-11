@@ -22,7 +22,7 @@ from app.db.models import Base  # noqa: E402
 config = context.config
 
 # Override sqlalchemy.url with the real value from app settings.
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # Set up Python logging from the alembic.ini [loggers] section.
 if config.config_file_name is not None:
@@ -74,6 +74,13 @@ def run_migrations_online() -> None:
 
     Creates an engine and associates a connection with the context.
     """
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        context.configure(connection=supplied_connection, target_metadata=target_metadata, render_item=_render_vector_type)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

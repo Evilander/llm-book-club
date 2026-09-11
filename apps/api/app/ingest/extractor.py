@@ -9,7 +9,7 @@ from typing import Literal
 from pathlib import Path
 
 from pypdf import PdfReader
-from ebooklib import epub
+from ebooklib import ITEM_DOCUMENT, epub
 from bs4 import BeautifulSoup
 
 
@@ -210,7 +210,20 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
     sections = []
     current_pos = 0
 
-    for i, item in enumerate(book.get_items_of_type(9)):  # ITEM_DOCUMENT
+    # The manifest is a file inventory, not the reading order. Follow the spine
+    # and keep navigation documents out of the prose and retrieval corpus.
+    documents = (
+        [book.get_item_with_id(item_id) for item_id, _linear in book.spine]
+        if book.spine else list(book.get_items_of_type(ITEM_DOCUMENT))
+    )
+    for item in documents:
+        if (
+            item is None
+            or item.get_type() != ITEM_DOCUMENT
+            or isinstance(item, epub.EpubNav)
+            or "nav" in getattr(item, "properties", [])
+        ):
+            continue
         if not item.get_content():
             continue
 
@@ -253,7 +266,7 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
 
         sections.append(
             ExtractedSection(
-                title=sec_title or f"Section {i + 1}",
+                title=sec_title or f"Section {len(sections) + 1}",
                 section_type=sec_type,
                 order_index=len(sections),
                 text=text,

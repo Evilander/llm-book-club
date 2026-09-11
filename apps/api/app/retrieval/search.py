@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -58,45 +59,63 @@ async def vector_search(
 ) -> list[SearchResult]:
     """Semantic search using pgvector cosine similarity.
 
-    Returns up to *limit* candidates ordered by descending cosine similarity.
+    Use the half-precision HNSW index for candidates, then rank those candidates
+    with the stored full-precision vectors. Book and reading-slice bounds apply
+    before candidate selection.
     """
     t0 = time.perf_counter()
+
+    if limit <= 0 or section_ids == []:
+        return []
 
     # Check embedding cache before generating a new embedding
     cache = get_embedding_cache()
     query_embedding = cache.get(query)
+    cache_hit = query_embedding is not None
     if query_embedding is None:
         embeddings_client = get_embeddings_client()
         query_embedding = await embeddings_client.embed_single(query)
-        cache.set(query, query_embedding)
 
+    if (
+        len(query_embedding) != 3072
+        or not all(isinstance(x, (float, int)) and math.isfinite(x) for x in query_embedding)
+        or not any(query_embedding)
+    ):
+        raise ValueError("The library requires finite 3072-dimensional embeddings from the configured model.")
+    if not cache_hit:
+        cache.set(query, query_embedding)
     embedding_str = "[{}]".format(",".join(str(x) for x in query_embedding))
 
+    # Continue scanning when a book/slice filter discards ANN neighbors.
+    # This setting is transaction-local and requires pgvector >= 0.8.
+    db.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+
     sql = """
-        SELECT
-            c.id        AS chunk_id,
-            c.section_id,
-            s.title     AS section_title,
-            c.text,
-            c.char_start,
-            c.char_end,
-            c.source_ref,
-            1 - (c.embedding <=> :embedding_vec ::vector) AS score
-        FROM chunks c
-        JOIN sections s ON c.section_id = s.id
-        WHERE c.book_id = :book_id
-          AND c.embedding IS NOT NULL
+        WITH candidates AS MATERIALIZED (
+            SELECT c.* FROM chunks c
+            WHERE c.book_id = :book_id AND c.embedding IS NOT NULL
     """
 
     if section_ids:
         sql += "  AND c.section_id = ANY(:section_ids)\n"
 
-    sql += " ORDER BY c.embedding <=> :embedding_vec ::vector\n LIMIT :limit"
+    sql += """
+            ORDER BY c.embedding::halfvec(3072) <=> CAST(:embedding_vec AS halfvec(3072))
+            LIMIT :candidate_limit
+        )
+        SELECT c.id AS chunk_id, c.section_id, s.title AS section_title,
+               c.text, c.char_start, c.char_end, c.source_ref,
+               1 - (c.embedding <=> CAST(:embedding_vec AS vector(3072))) AS score
+        FROM candidates c JOIN sections s ON c.section_id = s.id
+        ORDER BY c.embedding <=> CAST(:embedding_vec AS vector(3072)), c.id
+        LIMIT :limit
+    """
 
     params: dict = {
         "book_id": book_id,
         "embedding_vec": embedding_str,
         "limit": limit,
+        "candidate_limit": max(40, limit * 4),
     }
     if section_ids:
         params["section_ids"] = section_ids
@@ -141,6 +160,9 @@ def fts_search(
     """
     t0 = time.perf_counter()
 
+    if limit <= 0 or section_ids == []:
+        return []
+
     sql = """
         SELECT
             c.id        AS chunk_id,
@@ -167,15 +189,14 @@ def fts_search(
         params["section_ids"] = section_ids
 
     try:
-        result = db.execute(text(sql), params)
-        rows = result.fetchall()
+        # A failed optional FTS branch must not roll back the caller's pending
+        # messages, preferences, or progress. Isolate it with a savepoint.
+        with db.begin_nested():
+            result = db.execute(text(sql), params)
+            rows = result.fetchall()
     except Exception as exc:
-        # Most likely the text_search column does not exist yet.
-        # CRITICAL: rollback so the session is usable for subsequent queries.
-        db.rollback()
-        logger.warning(
-            "FTS search failed (text_search column may not exist): %s", exc
-        )
+        # Keep query text, book data, and database connection details out of logs.
+        logger.warning("FTS search failed (%s); using vector candidates", type(exc).__name__)
         return []
 
     elapsed = time.perf_counter() - t0
