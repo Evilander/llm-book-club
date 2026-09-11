@@ -15,6 +15,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     UniqueConstraint,
+    CheckConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -22,6 +23,16 @@ from pgvector.sqlalchemy import Vector
 
 class Base(DeclarativeBase):
     pass
+
+
+class LibraryConfiguration(Base):
+    """Non-secret choices shared by this single-owner library and its worker."""
+    __tablename__ = "library_configuration"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_library_configuration_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    llm_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class IngestStatus(str, PyEnum):

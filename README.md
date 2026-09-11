@@ -47,7 +47,7 @@ Copy-Item apps/api/.env.example apps/api/.env
 Copy-Item apps/web/.env.local.example apps/web/.env.local
 ```
 
-### 2. Add your API key
+### 2. Configure model access
 
 Edit `apps/api/.env`. The default uses OpenAI for both discussion and book embeddings:
 
@@ -56,6 +56,8 @@ OPENAI_API_KEY=your-key-here
 ```
 
 To discuss with Claude, also set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY`. Keep OpenAI configured for embeddings, or explicitly configure another embedding model that returns 3,072 dimensions. A Claude key alone does not prepare books in the default setup.
+
+To discuss through your ChatGPT subscription, use **Settings → Connect & read with ChatGPT** after starting the app. Docker includes the connection runtime. Book embeddings still need their own provider; ChatGPT sign-in does not replace that setup. See [ChatGPT connection](docs/chatgpt-connection.md) for installation, memory, and usage details.
 
 ### 3. Start the stack
 
@@ -128,8 +130,8 @@ Most settings live in `apps/api/.env`.
 
 Provider note:
 
-- This repo currently authenticates hosted model providers with server-side API credentials.
-- OpenAI and Anthropic end-user OAuth is not wired in here because their current API flows for this stack still use API-key style server authentication rather than drop-in user OAuth sessions.
+- ChatGPT subscription access uses the managed Codex App Server device-code flow. Credentials stay in an app-owned runtime profile; Settings persists the selected reading provider.
+- OpenAI and Anthropic API accounts use server-side API keys. Claude subscription sign-in is not implemented. Embedding and voice configuration remain separate from ChatGPT sign-in.
 
 Frontend configuration lives in `apps/web/.env.local`:
 

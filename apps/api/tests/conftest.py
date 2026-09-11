@@ -18,6 +18,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
 os.environ.setdefault("APP_ENV", "test")
+os.environ["CHATGPT_CODEX_BINARY"] = "readagain-test-runtime-not-installed"
+os.environ["CHATGPT_STATE_DIR"] = "/tmp/readagain-tests-do-not-initialize"
 
 # ---------------------------------------------------------------------------
 # 2. Patch pgvector.sqlalchemy.Vector before any model import so that the

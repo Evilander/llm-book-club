@@ -43,6 +43,10 @@ let prefs = { theme: 'cream-daylight', font_family: 'serif', font_size_px: 20, l
 let failNextPage = false;
 let companionGate = null;
 let failCompanionEdition = false;
+let activeProvider = 'openai';
+let chatgptConnected = false;
+let chatgptLoginState = 'pending';
+const loginFixture = () => ({ login_id: 'fixture-login', state: chatgptLoginState, user_code: chatgptLoginState === 'pending' ? 'TEST-CODE' : null, verification_url: chatgptLoginState === 'pending' ? 'https://auth.openai.com/codex/device' : null, expires_in: 600 });
 async function fixture(context) {
   await context.route('**/v1/**', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname;
@@ -87,7 +91,20 @@ async function fixture(context) {
       }
       if (suffix.endsWith('/feedback') || suffix === '/preferences') return json({ ok: true });
     }
-    if (path === '/v1/auth/status') return json({ authenticated: false, providers: [{ provider: 'openai', label: 'OpenAI', configured_auth_mode: 'api_key', connected: true, oauth_supported: false }, { provider: 'anthropic', label: 'Anthropic', configured_auth_mode: 'api_key', connected: false, oauth_supported: false }, { provider: 'google', label: 'Google Gemini', configured_auth_mode: 'oauth', connected: false, oauth_supported: true, oauth_ready: false }] });
+    if (path.startsWith('/v1/auth/chatgpt/') || path === '/v1/providers/active') {
+      assert.equal(req.headers()['x-readagain-settings'], '1', 'connection actions carry the first-party request header');
+      if (path === '/v1/auth/chatgpt/login') { chatgptLoginState = 'pending'; return json(loginFixture()); }
+      if (path === '/v1/auth/chatgpt/login/status') { if (chatgptLoginState === 'completed') chatgptConnected = true; return json(loginFixture()); }
+      if (path === '/v1/auth/chatgpt/login/cancel') { chatgptLoginState = 'cancelled'; return json({ status: 'cancelled' }); }
+      if (path === '/v1/auth/chatgpt/disconnect') { chatgptConnected = false; return json({ status: 'disconnected' }); }
+      if (path === '/v1/providers/active') { activeProvider = req.postDataJSON().provider; return json({ active_provider: activeProvider }); }
+    }
+    if (path === '/v1/auth/status') return json({ authenticated: false, active_provider: activeProvider, providers: [
+      { provider: 'chatgpt', label: 'ChatGPT', configured_auth_mode: 'device_code', connected: chatgptConnected, oauth_supported: true, oauth_ready: true, note: 'Uses the Codex access included with your ChatGPT plan. Its usage limits apply.' },
+      { provider: 'openai', label: 'OpenAI', configured_auth_mode: 'api_key', connected: true, oauth_supported: false },
+      { provider: 'anthropic', label: 'Anthropic', configured_auth_mode: 'api_key', connected: false, oauth_supported: false },
+      { provider: 'google', label: 'Google Gemini', configured_auth_mode: 'oauth', connected: false, oauth_supported: true, oauth_ready: false, note: 'Connect Google to use your configured Gemini cloud project.' },
+    ].map(provider => ({ ...provider, active: provider.provider === activeProvider })) });
     throw new Error(`Unmocked request: ${req.method()} ${path}`);
   });
 }
@@ -177,8 +194,36 @@ await page.getByText('The garden lets things change.', { exact: false }).waitFor
 await page.locator('.cite-bracket').first().click();
 await page.locator('.open-book-prose [data-selected="true"]').first().waitFor();
 await page.screenshot({ path: `${output}/book-club.png`, fullPage: false });
-await page.goto(`${base}/settings`); await page.getByText('API key configured', { exact: true }).waitFor();
+await page.goto(`${base}/settings`); await page.getByText('Your reading partner', { exact: true }).last().waitFor();
 await page.screenshot({ path: `${output}/settings.png`, fullPage: false });
+const chatgptRow = page.locator('.connection-row').filter({ has: page.getByRole('heading', { name: 'ChatGPT', exact: true }) });
+await chatgptRow.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+assert.equal(await page.getByRole('link', { name: 'Continue at OpenAI' }).getAttribute('href'), 'https://auth.openai.com/codex/device');
+await page.screenshot({ path: `${output}/chatgpt-sign-in.png`, fullPage: true });
+await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined }));
+await page.getByRole('button', { name: 'Copy sign-in code' }).click();
+await page.getByRole('alert').filter({ hasText: 'Select and copy the code above.' }).waitFor();
+await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor({ state: 'hidden' });
+assert.equal(activeProvider, 'openai', 'cancelling login leaves the previous provider selected');
+await chatgptRow.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'completed';
+await chatgptRow.getByText('Your reading partner', { exact: true }).waitFor();
+assert.equal(activeProvider, 'chatgpt');
+await page.reload();
+await chatgptRow.getByText('Your reading partner', { exact: true }).waitFor();
+await chatgptRow.getByRole('button', { name: 'Disconnect', exact: true }).click();
+await chatgptRow.getByText('Selected · reconnect', { exact: true }).waitFor();
+assert.equal(activeProvider, 'chatgpt', 'disconnect never switches to an API key');
+await chatgptRow.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'expired';
+await page.getByRole('alert').filter({ hasText: 'That sign-in code expired.' }).waitFor();
+await chatgptRow.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
 await fixture(mobile);
 const phone = await mobile.newPage(); phone.on('pageerror', e => errors.push(e.message));
@@ -207,6 +252,12 @@ await phone.getByRole('dialog').waitFor();
 await phone.locator('.open-book-prose [data-selected="true"]').first().waitFor();
 await phone.getByRole('button', { name: 'Close book panel' }).click();
 assert.equal(await phone.getByRole('dialog').count(), 0);
+await phone.goto(`${base}/settings`);
+await phone.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await phone.getByText('TEST-CODE', { exact: true }).waitFor();
+await phone.screenshot({ path: `${output}/chatgpt-mobile.png`, fullPage: true });
+assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'mobile connection controls fit the viewport');
+await phone.getByRole('button', { name: 'Cancel', exact: true }).click();
 assert.deepEqual(errors, [], 'no browser runtime errors');
 assert.ok(posts.some(p => p.path.endsWith('/companion') && p.body.page === 2), 'updates companion to new page');
 assert.ok(posts.some(p => p.path.endsWith('/companion') && p.body.edition_id === 'e'.repeat(64)), 'companion receives the edition displayed on the page');
@@ -221,4 +272,4 @@ assert.equal(await turningPage.locator('.paper-turn-sheet').getAttribute('aria-h
 await turningPage.waitForFunction(() => !document.querySelector('.paper-turn-sheet'));
 assert.match(turningPage.url(), /page=2/);
 await browser.close();
-console.log('PASS: desktop/mobile reading, paper persistence, exact highlights, page retry/resume, companion streaming, citation navigation, book club and dialogs.');
+console.log('PASS: desktop/mobile reading, paper persistence, exact highlights, page retry/resume, companion streaming, citation navigation, book club, dialogs, and ChatGPT connection lifecycle.');

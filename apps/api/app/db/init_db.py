@@ -36,7 +36,7 @@ def validate_unversioned_library(connection) -> None:
     problems = []
     for name, table in Base.metadata.tables.items():
         if name not in tables:
-            if name != "reading_prefs":  # Migration 007 creates this known omission.
+            if name not in {"reading_prefs", "library_configuration"}:  # Known additive migrations.
                 problems.append(f"missing table {name}")
             continue
         columns = {column['name']: column for column in schema.get_columns(name)}

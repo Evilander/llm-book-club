@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from contextlib import aclosing
 
 from sqlalchemy.orm import Session
 
@@ -590,13 +591,14 @@ class BaseAgent:
             *conversation,
         ]
 
-        async for chunk in self.llm.stream(
+        async with aclosing(self.llm.stream(
             messages,
             temperature=temperature,
             max_tokens=settings.max_tokens_per_turn,
-        ):
-            if chunk:
-                yield chunk
+        )) as response:
+            async for chunk in response:
+                if chunk:
+                    yield chunk
 
 
 class FacilitatorAgent(BaseAgent):

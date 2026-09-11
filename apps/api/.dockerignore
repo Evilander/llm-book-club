@@ -6,6 +6,8 @@ venv
 .env.*
 storage
 book_storage
+.readagain
+chatgpt_state
 *.sqlite*
 *.db
 *.pem

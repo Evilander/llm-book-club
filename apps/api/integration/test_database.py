@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.db import init_db as bootstrap
-from app.db.models import Base, Book, Chunk, IngestStatus, Section
+from app.db.models import Base, Book, Chunk, IngestStatus, Section, LibraryConfiguration
 from app.retrieval import search
 
 
@@ -33,7 +33,7 @@ def test_fresh_bootstrap_and_repeated_start_keep_data(pg_engine):
     seed_book(pg_engine)
     bootstrap.init_db()
     with pg_engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "007"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
         assert connection.execute(text("SELECT count(*) FROM books")).scalar_one() == 2
         assert connection.execute(text("SELECT count(*) FROM chunks WHERE text_search @@ plainto_tsquery('english', 'cartographer')")).scalar_one() == 3
         bootstrap.verify_search_objects(connection)
@@ -63,6 +63,7 @@ def test_upgrade_repairs_old_stamped_database_without_losing_books(pg_engine):
         connection.execute(text("CREATE EXTENSION vector"))
         Base.metadata.create_all(connection)
         connection.execute(text("DROP TABLE reading_prefs"))
+        connection.execute(text("DROP TABLE library_configuration"))
         connection.execute(text("CREATE INDEX ix_chunks_embedding_hnsw ON chunks (order_index)"))
         command.stamp(bootstrap.migration_config(connection), "006")
     seed_book(pg_engine)
@@ -70,8 +71,27 @@ def test_upgrade_repairs_old_stamped_database_without_losing_books(pg_engine):
     with pg_engine.connect() as connection:
         bootstrap.verify_search_objects(connection)
         assert connection.execute(text("SELECT count(*) FROM chunks")).scalar_one() == 3
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "007"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
     assert inspect(pg_engine).has_table("reading_prefs")
+    assert inspect(pg_engine).has_table("library_configuration")
+
+
+def test_provider_choice_survives_restart_and_concurrent_first_selection(pg_engine):
+    from app.providers.selection import select_provider, selected_provider
+    bootstrap.init_db()
+
+    def choose(provider):
+        with Session(pg_engine) as db:
+            select_provider(db, provider)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(choose, ["chatgpt", "anthropic"]))
+    with Session(pg_engine) as db:
+        assert db.query(LibraryConfiguration).count() == 1
+        select_provider(db, "chatgpt")
+    bootstrap.init_db()
+    with Session(pg_engine) as db:
+        assert selected_provider(db) == "chatgpt"
 
 
 def test_unversioned_library_is_not_silently_stamped(pg_engine):
@@ -96,7 +116,7 @@ def test_downgrade_preserves_data_and_search_objects(pg_engine):
         bootstrap.verify_search_objects(connection)
     bootstrap.init_db()
     with pg_engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "007"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
         bootstrap.verify_search_objects(connection)
 
 

@@ -49,6 +49,8 @@ storage/
 *.db
 *.dump
 book_storage/
+.readagain/
+chatgpt_state/
 /books/*
 !/books/.gitkeep
 

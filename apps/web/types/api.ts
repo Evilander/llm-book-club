@@ -179,12 +179,14 @@ export interface ProviderStatus {
   account_email?: string | null;
   connect_path?: string | null;
   note: string;
+  active?: boolean;
 }
 
 export interface AuthStatusPayload {
   authenticated: boolean;
   user: AuthenticatedUser | null;
   providers: ProviderStatus[];
+  active_provider?: string;
 }
 
 export interface BinderyStatusResponse {
