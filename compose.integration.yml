@@ -1,6 +1,9 @@
 # Isolated integration stack; no personal library, credentials, or paid providers.
 x-api: &test-api
-  build: ./apps/api
+  build:
+    context: ./apps/api
+    args:
+      INSTALL_LOCAL_MODELS: "false"
   image: readagain-api:integration
   environment: &test-environment
     DATABASE_URL: postgresql+psycopg://readagain_test:integration-only@db:5432/readagain_integration
@@ -10,6 +13,9 @@ x-api: &test-api
     LOCAL_LLM_BASE_URL: http://provider:9000/v1
     EMBEDDINGS_PROVIDER: local
     LOCAL_EMBEDDINGS_BASE_URL: http://provider:9000/v1
+    LOCAL_EMBEDDINGS_MODEL: integration-fixture
+    LOCAL_EMBEDDINGS_REVISION: integration-fixture-v1
+    LOCAL_EMBEDDINGS_DIMENSION: 3072
     MAX_HISTORY_MESSAGES: 2
   profiles: [app]
 services:

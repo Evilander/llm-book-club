@@ -2532,3 +2532,6 @@ mark.animate-pulse-glow {
     transparent 50%
   );
 }
+
+.book-search-status { margin: 1.25rem 0; padding: 1rem 0; border-block: 1px solid hsl(var(--border)); font-size: .9rem; line-height: 1.6; color: hsl(var(--muted-foreground)); }
+.book-search-status .text-link { margin-top: .5rem; }

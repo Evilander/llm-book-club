@@ -178,37 +178,34 @@ class TestEmbeddingCache:
         from app.retrieval.cache import EmbeddingCache
 
         cache = EmbeddingCache("redis://fake:6379/0")
-        key1 = cache._cache_key("test query")
-        key2 = cache._cache_key("test query")
+        key1 = cache._cache_key("test query", "space")
+        key2 = cache._cache_key("test query", "space")
         assert key1 == key2
 
     def test_cache_key_differs_for_different_queries(self):
         from app.retrieval.cache import EmbeddingCache
 
         cache = EmbeddingCache("redis://fake:6379/0")
-        key1 = cache._cache_key("query one")
-        key2 = cache._cache_key("query two")
+        key1 = cache._cache_key("query one", "space")
+        key2 = cache._cache_key("query two", "space")
         assert key1 != key2
 
     def test_cache_key_format(self):
         from app.retrieval.cache import EmbeddingCache
 
         cache = EmbeddingCache("redis://fake:6379/0")
-        key = cache._cache_key("hello")
+        key = cache._cache_key("hello", "space")
         assert key.startswith("embed_cache:")
-        # Should contain a 16-char hex hash
-        hash_part = key.split(":")[1]
-        assert len(hash_part) == 16
-        # Verify it matches the sha256 of the query
-        expected_hash = hashlib.sha256("hello".encode()).hexdigest()[:16]
-        assert hash_part == expected_hash
+        assert key.startswith("embed_cache:v2:")
+        assert len(key.rsplit(":", 1)[1]) == 64
+        assert key != cache._cache_key("hello", "another-space")
 
     def test_get_returns_none_when_redis_unavailable(self):
         """When Redis is not running, get() should gracefully return None."""
         from app.retrieval.cache import EmbeddingCache
 
         cache = EmbeddingCache("redis://localhost:1/0")  # unlikely port
-        result = cache.get("test")
+        result = cache.get("test", "space")
         assert result is None
 
     def test_set_does_not_raise_when_redis_unavailable(self):
@@ -217,4 +214,4 @@ class TestEmbeddingCache:
 
         cache = EmbeddingCache("redis://localhost:1/0")
         # Should not raise
-        cache.set("test", [0.1, 0.2, 0.3])
+        cache.set("test", [0.1, 0.2, 0.3], "space")

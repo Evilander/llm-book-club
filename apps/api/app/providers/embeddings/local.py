@@ -1,86 +1,55 @@
-"""Local embeddings provider using sentence-transformers."""
-from __future__ import annotations
-
-import logging
+"""Pinned local encoder, loaded once per process and run off the event loop."""
+import asyncio
+from pathlib import Path
+import threading
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from .space import EmbeddingSpace
 
 
 class LocalEmbeddings:
-    """
-    Local embeddings client using sentence-transformers.
-
-    The model is lazy-loaded on first call to avoid slow import/download
-    at startup.
-    """
-
-    def __init__(
-        self,
-        model_name: str = "BAAI/bge-m3",
-        device: str = "cpu",
-    ):
-        self.model_name = model_name
+    def __init__(self, space: EmbeddingSpace, *, device: str, cache_dir: str, threads: int):
+        self.space = space
         self.device = device
+        self.cache_dir = cache_dir
+        self.threads = threads
         self._model: Any = None
-        self._dimension: int | None = None
-
-    def _load_model(self) -> None:
-        """Lazy-load the sentence-transformers model."""
-        if self._model is not None:
-            return
-
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            raise ImportError(
-                "sentence-transformers is required for local embeddings. "
-                "Install with: pip install sentence-transformers>=3.0.0"
-            )
-
-        logger.info(
-            "Loading local embeddings model %s on %s",
-            self.model_name,
-            self.device,
-        )
-        self._model = SentenceTransformer(self.model_name, device=self.device)
-        self._dimension = self._model.get_sentence_embedding_dimension()
-        logger.info(
-            "Loaded %s — dimension=%d", self.model_name, self._dimension
-        )
+        self._lock = threading.Lock()
 
     @property
     def dimension(self) -> int:
-        self._load_model()
-        assert self._dimension is not None
-        return self._dimension
+        return self.space.dimension
+
+    def _encode(self, texts: list[str], *, query: bool) -> list[list[float]]:
+        # One load/inference at a time, including after a cancelled coroutine.
+        with self._lock:
+            if self._model is None:
+                try:
+                    import torch
+                    from sentence_transformers import SentenceTransformer
+                except ImportError:
+                    raise RuntimeError("Install requirements-local.txt to use local book search.") from None
+                Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
+                torch.set_num_threads(self.threads)
+                model = SentenceTransformer(
+                    self.space.model, revision=self.space.revision,
+                    device=self.device, cache_folder=self.cache_dir,
+                    trust_remote_code=False, token=False,
+                    model_kwargs={"use_safetensors": True},
+                )
+                if model.get_sentence_embedding_dimension() != self.space.dimension:
+                    raise ValueError("LOCAL_EMBEDDINGS_DIMENSION does not match the pinned model.")
+                model.max_seq_length = self.space.max_tokens
+                self._model = model
+            vectors = self._model.encode(
+                texts, batch_size=8, show_progress_bar=False,
+                normalize_embeddings=True,
+                prompt=self.space.query_prompt if query else self.space.document_prompt,
+            )
+            return vectors.tolist()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """
-        Generate embeddings for a list of texts.
-
-        sentence-transformers encode() is synchronous and handles batching
-        internally, so we call it directly.  For truly non-blocking behaviour
-        in a production async server you would want to run this in a thread
-        pool; for simplicity we call it inline here.
-        """
-        if not texts:
-            return []
-
-        self._load_model()
-        assert self._model is not None
-
-        # encode returns a numpy ndarray of shape (len(texts), dim)
-        embeddings = self._model.encode(
-            texts,
-            batch_size=32,
-            show_progress_bar=False,
-            normalize_embeddings=True,
-        )
-
-        return [vec.tolist() for vec in embeddings]
+        return await asyncio.to_thread(self._encode, texts, query=False) if texts else []
 
     async def embed_single(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
-        embeddings = await self.embed([text])
-        return embeddings[0] if embeddings else []
+        return (await asyncio.to_thread(self._encode, [text], query=True))[0]

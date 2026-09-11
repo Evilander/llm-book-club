@@ -17,9 +17,19 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("OPENAI_API_KEY", "test-key-not-real")
+os.environ["EMBEDDINGS_PROVIDER"] = "openai"
 os.environ.setdefault("APP_ENV", "test")
 os.environ["CHATGPT_CODEX_BINARY"] = "readagain-test-runtime-not-installed"
 os.environ["CHATGPT_STATE_DIR"] = "/tmp/readagain-tests-do-not-initialize"
+
+
+@pytest.fixture(autouse=True)
+def no_live_memory_encoder(monkeypatch):
+    # SQLite cannot evaluate vector distances. Real recall is exercised in the
+    # separate Postgres suite; unit turns must never contact a paid provider.
+    from unittest.mock import AsyncMock
+    from app.services import book_recall
+    monkeypatch.setattr(book_recall, "index_reader_message", AsyncMock())
 
 # ---------------------------------------------------------------------------
 # 2. Patch pgvector.sqlalchemy.Vector before any model import so that the

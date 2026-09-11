@@ -9,10 +9,13 @@ from sqlalchemy.orm import Session
 from app.db import init_db as bootstrap
 from app.db.models import Base, Book, Chunk, IngestStatus, Section, LibraryConfiguration
 from app.retrieval import search
+from app.providers.embeddings.space import configured_space
+from app.providers.embeddings.persistence import register_space
 
 
 def seed_book(engine):
     with Session(engine) as db:
+        register_space(db, configured_space())
         db.add_all([
             Book(id="book", title="Fixture book", filename="fixture.txt", file_type="txt", file_size_bytes=10, ingest_status=IngestStatus.COMPLETED),
             Book(id="other", title="Other fixture", filename="other.txt", file_type="txt", file_size_bytes=10, ingest_status=IngestStatus.COMPLETED),
@@ -24,7 +27,7 @@ def seed_book(engine):
         for i, (section_id, book_id) in enumerate([("read", "book"), ("later", "book"), ("other", "other")]):
             db.add(Chunk(id=section_id, book_id=book_id, section_id=section_id, order_index=0,
                          text="The cartographer found an amber compass.", char_start=i*100, char_end=(i+1)*100,
-                         embedding=[1.0] + [0.0] * 3071))
+                         embedding=[1.0] + [0.0] * 3071, embedding_space=configured_space().id))
         db.commit()
 
 
@@ -33,7 +36,7 @@ def test_fresh_bootstrap_and_repeated_start_keep_data(pg_engine):
     seed_book(pg_engine)
     bootstrap.init_db()
     with pg_engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "009"
         assert connection.execute(text("SELECT count(*) FROM books")).scalar_one() == 2
         assert connection.execute(text("SELECT count(*) FROM chunks WHERE text_search @@ plainto_tsquery('english', 'cartographer')")).scalar_one() == 3
         bootstrap.verify_search_objects(connection)
@@ -71,7 +74,7 @@ def test_upgrade_repairs_old_stamped_database_without_losing_books(pg_engine):
     with pg_engine.connect() as connection:
         bootstrap.verify_search_objects(connection)
         assert connection.execute(text("SELECT count(*) FROM chunks")).scalar_one() == 3
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "009"
     assert inspect(pg_engine).has_table("reading_prefs")
     assert inspect(pg_engine).has_table("library_configuration")
 
@@ -116,7 +119,7 @@ def test_downgrade_preserves_data_and_search_objects(pg_engine):
         bootstrap.verify_search_objects(connection)
     bootstrap.init_db()
     with pg_engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "008"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "009"
         bootstrap.verify_search_objects(connection)
 
 

@@ -26,7 +26,7 @@ from .metrics import TurnMetrics
 from .token_budget import truncate_history
 from .sentence_splitter import SentenceSplitter
 from .analysis_stream import AnalysisStream
-from ..services.book_recall import book_recall
+from ..services.book_recall import recall_for_turn
 from ..services.reading_scope import ReadingScope, session_scope
 
 from contextlib import aclosing
@@ -356,7 +356,7 @@ class DiscussionEngine:
 
         return user_content
 
-    def _get_conversation_history(self) -> list[LLMMessage]:
+    async def _get_conversation_history(self) -> list[LLMMessage]:
         """Get conversation history as LLM messages, truncated to budget.
 
         Applies ``settings.max_history_messages`` to keep context size bounded.
@@ -387,7 +387,8 @@ class DiscussionEngine:
 
         recent_ids = {m.id for m in messages[-settings.max_history_messages:]} if settings.max_history_messages > 0 else {m.id for m in messages}
         query = next((m.content for m in reversed(messages) if m.role == MessageRole.USER), "")
-        recall = book_recall(self.db, self.session.book_id, self.scope.section_ids, query, recent_ids, scope=self.scope)
+        reader_message = next((m for m in reversed(messages) if m.role == MessageRole.USER), None)
+        recall = await recall_for_turn(self.db, self.session.book_id, self.scope.section_ids, query, recent_ids, scope=self.scope, reader_message=reader_message)
         if recall:
             # Keep the role prompt as the only system message (Anthropic also
             # expects one). Memory is labelled user data, not a second prompt.
@@ -486,7 +487,7 @@ class DiscussionEngine:
         self._save_message(MessageRole.USER, user_content)
 
         # Get conversation history
-        history = self._get_conversation_history()
+        history = await self._get_conversation_history()
 
         # Adaptive agent selection (MARS pattern)
         if adaptive and include_close_reader:
@@ -639,7 +640,7 @@ class DiscussionEngine:
 
         self._save_message(MessageRole.USER, user_content)
 
-        history = self._get_conversation_history()
+        history = await self._get_conversation_history()
 
         # Build a context-aware retrieval query for vague follow-ups
         retrieval_query = self._build_retrieval_query(user_content, history)
@@ -901,7 +902,7 @@ class DiscussionEngine:
 
     async def generate_summary(self) -> str:
         """Generate a summary of the discussion."""
-        history = self._get_conversation_history()  # already truncated
+        history = await self._get_conversation_history()  # already truncated
 
         summary_prompt = """Please provide a concise summary of this book discussion.
 

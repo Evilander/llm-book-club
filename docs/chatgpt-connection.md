@@ -4,7 +4,7 @@ Open **Settings → Connect & read with ChatGPT**, copy the displayed code, and 
 
 This uses the Codex access available to your ChatGPT account and its usage limits. If OpenAI requests it, enable device-code sign-in in your ChatGPT security settings. Availability can depend on your plan and workspace policy. The connection uses OpenAI's managed [App Server authentication flow](https://learn.chatgpt.com/docs/app-server), described further in the [authentication documentation](https://learn.chatgpt.com/docs/auth).
 
-Book ingestion still requires a separately configured embedding provider. The default is the OpenAI embeddings API, with separate API billing. This connection does not provide embeddings or voice. Existing books can be read with ChatGPT once connected; search continues using the configured embedding provider. See the [main setup guide](../README.md) for those settings.
+Book search and memory use the bundled CPU encoder by default, with no embedding API key. Existing installations retain their configured embedding provider. Voice keeps its own settings. See [local search and memory](local-search.md) for setup and refreshing existing books.
 
 ## Installation
 

@@ -31,7 +31,7 @@ See [development and verification](docs/development.md) for the tested installat
 ### Prerequisites
 
 - Docker
-- An OpenAI API key for the default chat and embedding configuration. Other chat providers also need a configured embedding provider.
+- A ChatGPT subscription with Codex access, or an API account for your chosen discussion provider. Book search runs locally by default.
 
 ### 1. Copy environment files
 
@@ -49,15 +49,13 @@ Copy-Item apps/web/.env.local.example apps/web/.env.local
 
 ### 2. Configure model access
 
-Edit `apps/api/.env`. The default uses OpenAI for both discussion and book embeddings:
+Book preparation and memory search use the bundled CPU encoder. Its public model weights download on first use and stay in a shared cache; no embedding API key is needed.
 
-```env
-OPENAI_API_KEY=your-key-here
-```
+For discussion through your ChatGPT subscription, use **Settings → Connect & read with ChatGPT** after starting the app. Docker includes the connection runtime. See [ChatGPT connection](docs/chatgpt-connection.md) for account access and usage details.
 
-To discuss with Claude, also set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY`. Keep OpenAI configured for embeddings, or explicitly configure another embedding model that returns 3,072 dimensions. A Claude key alone does not prepare books in the default setup.
+Alternatively, set `OPENAI_API_KEY` in `apps/api/.env` for OpenAI API discussion, or set `LLM_PROVIDER=claude` and `ANTHROPIC_API_KEY` for Claude API discussion. These choices keep book search local. Voice has its own provider settings.
 
-To discuss through your ChatGPT subscription, use **Settings → Connect & read with ChatGPT** after starting the app. Docker includes the connection runtime. Book embeddings still need their own provider; ChatGPT sign-in does not replace that setup. See [ChatGPT connection](docs/chatgpt-connection.md) for installation, memory, and usage details.
+Existing installations retain their explicit environment settings. To move book search to the local encoder, follow [local search and memory](docs/local-search.md), then use **Refresh search & memory** on each existing book’s overview.
 
 ### 3. Start the stack
 
@@ -82,7 +80,8 @@ cd apps/api
 python -m venv .venv
 # PowerShell: .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt -r requirements-local.txt
 uvicorn app.main:app --reload
 ```
 
@@ -114,7 +113,7 @@ npm run dev
 Most settings live in `apps/api/.env`.
 
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROK_API_KEY`: hosted LLM provider credentials.
-- `LLM_PROVIDER`: `openai`, `claude`, `gemini`, `grok`, or `local`.
+- `LLM_PROVIDER`: `chatgpt`, `openai`, `claude`, `gemini`, `grok`, or `local`.
 - `LOCAL_LLM_BASE_URL`: OpenAI-compatible local endpoint, such as Ollama.
 - `EMBEDDINGS_PROVIDER`: `openai`, `gemini`, or `local`.
 - `OPENAI_EMBEDDINGS_MODEL`, `LOCAL_EMBEDDINGS_BASE_URL`, `LOCAL_EMBEDDINGS_MODEL`: embedding configuration.

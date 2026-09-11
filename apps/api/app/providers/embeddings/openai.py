@@ -22,6 +22,9 @@ class OpenAIEmbeddings:
         api_key: str | None = None,
         model: str | None = None,
         base_url: str = "https://api.openai.com/v1",
+        dimension: int | None = None,
+        query_prompt: str = "",
+        document_prompt: str = "",
     ):
         self.api_key = api_key or settings.openai_api_key
         self.base_url = base_url.rstrip("/")
@@ -32,16 +35,18 @@ class OpenAIEmbeddings:
             raise ValueError("OpenAI API key not configured")
 
         self.model = model or settings.openai_embeddings_model
-        # For Ollama, use nomic-embed-text if not specified
-        if self.is_local and self.model.startswith("text-embedding"):
-            self.model = "nomic-embed-text"
-        self._dimension = self.MODEL_DIMENSIONS.get(self.model, 768 if self.is_local else 3072)
+        self._dimension = dimension or self.MODEL_DIMENSIONS.get(self.model, 768 if self.is_local else 3072)
+        self.query_prompt = query_prompt
+        self.document_prompt = document_prompt
 
     @property
     def dimension(self) -> int:
         return self._dimension
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed([self.document_prompt + text for text in texts])
+
+    async def _embed(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for texts using OpenAI API."""
         if not texts:
             return []
@@ -88,5 +93,5 @@ class OpenAIEmbeddings:
 
     async def embed_single(self, text: str) -> list[float]:
         """Generate embedding for a single text."""
-        embeddings = await self.embed([text])
+        embeddings = await self._embed([self.query_prompt + text])
         return embeddings[0] if embeddings else []
