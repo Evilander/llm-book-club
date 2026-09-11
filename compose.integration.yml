@@ -39,6 +39,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+  storage-init:
+    <<: *test-api
+    user: "0:0"
+    network_mode: none
+    command: ["chown", "-R", "--no-dereference", "1001:1001", "/app/storage"]
+    volumes:
+      - test_uploads:/app/storage
   api:
     <<: *test-api
     ports:
@@ -46,6 +53,8 @@ services:
     volumes:
       - test_uploads:/app/storage
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       redis:

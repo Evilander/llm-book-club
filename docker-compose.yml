@@ -40,6 +40,17 @@ services:
       db:
         condition: service_healthy
 
+  storage-init:
+    build:
+      context: ./apps/api
+      args:
+        INSTALL_LOCAL_MODELS: ${INSTALL_LOCAL_MODELS:-false}
+    user: "0:0"
+    network_mode: none
+    command: ["chown", "-R", "--no-dereference", "1001:1001", "/app/storage"]
+    volumes:
+      - book_storage:/app/storage
+
   api:
     build:
       context: ./apps/api
@@ -56,6 +67,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
@@ -87,6 +100,8 @@ services:
     env_file:
       - ./apps/api/.env
     depends_on:
+      storage-init:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       db:
