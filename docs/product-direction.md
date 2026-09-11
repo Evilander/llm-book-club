@@ -30,4 +30,6 @@ Discussion citations now require real source spans. Page positions are pinned to
 
 The existing browser fixture is useful UI evidence. The HTTP provider fixture proves transport, persistence, and retrieval plumbing. Neither is evidence of live model quality. Keep that distinction in release notes.
 
+An opt-in [live reading evaluation](live-reading-evaluation.md) now exercises an authored three-chapter book through a real local model, including cross-session recall and a browser conversation. Its deterministic checks passed on the recorded configuration; human review still found unsupported interpretive details. Broader model quality and sustained long-book reading remain open acceptance work.
+
 The deployment target is one person's local library. Hosting unrelated users requires a separate authorization and ownership design before it can be offered.

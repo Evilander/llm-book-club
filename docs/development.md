@@ -66,6 +66,8 @@ READING_TEST_URL=http://127.0.0.1:3000 npm run test:reader
 
 The browser suite covers paper, Bionic text, pagination, highlights, desktop/mobile drawers, streaming, and saved preferences. It uses request fixtures. GitHub Actions runs these checks, the real integration stack, and a pinned Gitleaks credential scan. Review personal information separately; a secret scanner cannot identify every private detail.
 
+For actual model behavior, run the opt-in [live reading evaluation](live-reading-evaluation.md) against a separate local test library. It checks an authored miniature's margin questions, citations, cross-session memory, spoiler boundary, and club conversation, and saves the replies for human review. It is separate from the deterministic CI provider.
+
 ## Database upgrades and recovery
 
 Back up the library before upgrading an existing installation:
