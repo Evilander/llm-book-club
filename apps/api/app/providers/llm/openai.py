@@ -42,27 +42,28 @@ class OpenAIClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    def _request_body(self, messages: list[LLMMessage], temperature: float, max_tokens: int) -> dict:
+        body = {"model": self.model, "messages": self._format_messages(messages),
+                "temperature": temperature, "max_tokens": max_tokens}
+        if self.is_local and settings.local_llm_reasoning_effort != "provider":
+            body["reasoning_effort"] = settings.local_llm_reasoning_effort
+        return body
+
+    @staticmethod
+    def _check_answer(content: str, finish_reason: str | None) -> None:
+        if finish_reason == "length":
+            raise ValueError("The model reached its response limit before finishing. Try a shorter reply or lower local reasoning effort.")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("The model returned no answer. Try again or check the model settings.")
+
     async def complete(
         self,
         messages: list[LLMMessage],
         temperature: float = 0.7,
         max_tokens: int = 2048,
     ) -> str:
-        """Generate a completion."""
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
-                json={
-                    "model": self.model,
-                    "messages": self._format_messages(messages),
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+        """Generate a complete, non-empty answer."""
+        return (await self.complete_with_usage(messages, temperature, max_tokens)).content
 
     async def complete_with_usage(
         self,
@@ -75,16 +76,13 @@ class OpenAIClient:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._get_headers(),
-                json={
-                    "model": self.model,
-                    "messages": self._format_messages(messages),
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                },
+                json=self._request_body(messages, temperature, max_tokens),
             )
             response.raise_for_status()
             data = response.json()
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"].get("content")
+            self._check_answer(content, choice.get("finish_reason"))
             usage = data.get("usage", {})
             return LLMResponse(
                 content=content,
@@ -109,6 +107,9 @@ class OpenAIClient:
         stream_input_tokens = 0
         stream_output_tokens = 0
         stream_model = self.model
+        finish_reason = None
+        saw_done = False
+        has_content = False
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
@@ -116,10 +117,7 @@ class OpenAIClient:
                 f"{self.base_url}/chat/completions",
                 headers=self._get_headers(),
                 json={
-                    "model": self.model,
-                    "messages": self._format_messages(messages),
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
+                    **self._request_body(messages, temperature, max_tokens),
                     "stream": True,
                     "stream_options": {"include_usage": True},
                 },
@@ -129,6 +127,7 @@ class OpenAIClient:
                     if line.startswith("data: "):
                         data = line[6:]
                         if data == "[DONE]":
+                            saw_done = True
                             break
                         try:
                             chunk = json.loads(data)
@@ -141,9 +140,13 @@ class OpenAIClient:
                                 usage = chunk["usage"]
                                 stream_input_tokens = usage.get("prompt_tokens", 0)
                                 stream_output_tokens = usage.get("completion_tokens", 0)
-                            delta = chunk["choices"][0].get("delta", {}) if chunk.get("choices") else {}
-                            if "content" in delta:
-                                yield delta["content"]
+                            choice = chunk["choices"][0] if chunk.get("choices") else {}
+                            finish_reason = choice.get("finish_reason") or finish_reason
+                            delta = choice.get("delta", {})
+                            content = delta.get("content")
+                            if isinstance(content, str) and content:
+                                has_content = has_content or bool(content.strip())
+                                yield content
                         except (json.JSONDecodeError, IndexError, KeyError):
                             continue
 
@@ -153,6 +156,9 @@ class OpenAIClient:
             output_tokens=stream_output_tokens,
             model=stream_model,
         )
+        if not saw_done and finish_reason is None:
+            raise ValueError("The model stream ended before the answer was complete.")
+        self._check_answer("answer" if has_content else "", finish_reason)
 
     @property
     def last_stream_usage(self) -> LLMResponse | None:

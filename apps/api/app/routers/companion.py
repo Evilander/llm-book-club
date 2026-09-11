@@ -85,12 +85,21 @@ def open_companion(book_id: str, req: CompanionRequest, db: Session = Depends(ge
     return {"session_id": session.id, "remembered_turns": count, "reading_position": scope.position if scope is not None else (session.preferences_json or {}).get("reading_position")}
 
 
-def verified_page_notes(raw: str, reading, page_start: int, page_end: int, chunks: list[Chunk]) -> list[dict]:
+def verified_page_notes(raw: str, reading, page_start: int, page_end: int, chunks: list[Chunk], *, strict: bool = False) -> list[dict]:
     try:
-        payload = json.loads(raw)
-    except (ValueError, TypeError):
+        text = raw.strip()
+        if text.startswith("```json\n") or text.startswith("```\n"):
+            text = text.split("\n", 1)[1]
+            if text.rstrip().endswith("```"):
+                text = text.rstrip()[:-3]
+        payload = json.loads(text)
+    except (ValueError, TypeError, AttributeError):
+        if strict:
+            raise ValueError("The model did not return page questions.") from None
         return []
     if not isinstance(payload, dict) or not isinstance(payload.get("notes"), list):
+        if strict:
+            raise ValueError("The model did not return page questions.")
         return []
     spans = {span["chunk_id"]: span for span in reading.chunks}
     result = []
@@ -114,6 +123,8 @@ def verified_page_notes(raw: str, reading, page_start: int, page_end: int, chunk
             else:
                 continue
             break
+    if strict and payload["notes"] and not result:
+        raise ValueError("The page questions could not be grounded in this page.")
     return result
 
 
@@ -136,7 +147,7 @@ async def create_page_notes(request: Request, book_id: str, req: PageNotesReques
         scope = build_scope(reading, position=ReaderPosition(page=req.page, page_size=req.page_size, edition_id=req.edition_id))
     except ValueError as error:
         raise HTTPException(409, str(error)) from None
-    cache_key = hashlib.sha256(f"margin-v2:{scope.edition_id}:{req.page}:{req.page_size}:{page_text}".encode()).hexdigest()
+    cache_key = hashlib.sha256(f"margin-v3:{scope.edition_id}:{req.page}:{req.page_size}:{page_text}".encode()).hexdigest()
     cached = db.query(Message).filter(Message.session_id == session.id, Message.metadata_json["reader_notes_key"].as_string() == cache_key).first()
     if cached:
         return {"notes": cached.metadata_json["notes"], "cached": True}
@@ -147,7 +158,10 @@ async def create_page_notes(request: Request, book_id: str, req: PageNotesReques
         raw = await get_llm_client(db=db).complete([LLMMessage(role="system", content=system), LLMMessage(role="user", content=json.dumps({"current_page": page_text, "earlier_thoughts": recall}, ensure_ascii=False))], temperature=0.4, max_tokens=650)
     except Exception:
         raise HTTPException(503, "Your companion couldn’t read this page just yet. Please try again.") from None
-    notes = verified_page_notes(raw, reading, start, end, [c for c in chunks if str(c.id) in {span["chunk_id"] for span in page_spans}])
+    try:
+        notes = verified_page_notes(raw, reading, start, end, [c for c in chunks if str(c.id) in {span["chunk_id"] for span in page_spans}], strict=True)
+    except ValueError:
+        raise HTTPException(503, "Your companion couldn’t verify its questions on this page. Please try again.") from None
     db.add(Message(session_id=session.id, role=MessageRole.SYSTEM, content="", metadata_json={"reader_notes_key": cache_key, "notes": notes, "reading_scope": scope.metadata}))
     db.commit()
     return {"notes": notes, "cached": False}
