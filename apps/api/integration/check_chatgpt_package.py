@@ -20,6 +20,8 @@ from app.providers.llm.codex_runtime import CodexRuntime
 async def main():
     provider = os.environ.get("TEST_PROVIDER_URL", "http://provider:9000")
     binary = os.environ.get("TEST_CODEX_BINARY", "codex")
+    assert "Apache License" in Path("/usr/share/licenses/codex/LICENSE").read_text()
+    assert "OpenAI Codex" in Path("/usr/share/licenses/codex/NOTICE").read_text()
 
     class FixtureRuntime(CodexRuntime):
         async def account(self):

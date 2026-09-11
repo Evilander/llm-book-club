@@ -22,6 +22,7 @@ COPY --chown=api:api app ./app
 COPY --chown=api:api alembic ./alembic
 COPY --chown=api:api alembic.ini run_worker.py ./
 COPY --from=chatgpt-runtime --chmod=755 /opt/codex-native /usr/local/bin/codex
+COPY third_party/codex/ /usr/share/licenses/codex/
 
 RUN mkdir -p /app/storage /app/chatgpt && chown api:api /app/storage /app/chatgpt && chmod 700 /app/chatgpt
 USER api
