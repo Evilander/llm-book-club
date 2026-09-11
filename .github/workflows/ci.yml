@@ -44,8 +44,26 @@ jobs:
       - run: pip install -r apps/api/requirements.txt
       - name: Unit regressions
         run: python -m pytest apps/api/tests -q
+      - name: Seed an upload volume owned by the previous container user
+        run: >-
+          docker compose -p readagain-verification -f compose.integration.yml --profile app
+          run --build --rm --no-deps --user 0:0 api python -c
+          "from pathlib import Path; import os; p = Path('/app/storage');
+          (p / 'legacy-fixture.txt').write_text('retained fixture'); os.chown(p, 0, 0); os.chmod(p, 0o755)"
       - name: Start isolated app, queue, and database
         run: docker compose -p readagain-verification -f compose.integration.yml --profile app up --build -d --wait
+      - name: Verify that existing uploads remain readable and writable
+        run: |
+          docker compose -p readagain-verification -f compose.integration.yml exec -T api python - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path('/app/storage')
+          assert os.getuid() == 1001
+          assert (p / 'legacy-fixture.txt').read_text() == 'retained fixture'
+          assert (p / 'legacy-fixture.txt').stat().st_uid == 1001
+          (p / 'write-probe.txt').write_text('writable')
+          (p / 'write-probe.txt').unlink()
+          PY
       - name: Real database and upload-to-discussion checks
         working-directory: apps/api
         run: python -m pytest integration -q

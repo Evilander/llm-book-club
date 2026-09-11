@@ -16,7 +16,9 @@ Configure a provider in the API environment file before preparing books. The def
 
 The migration service must finish before the API and worker start. The API verifies the migration head, generated full-text column, and search indexes. A failure stops startup. `/health` returns HTTP 503 when Postgres or Redis is unavailable and omits connection exception details.
 
-Services bind to loopback by default. The API runs as an unprivileged container user and includes its migrations. In-process local embeddings/reranking are optional: install `apps/api/requirements-local.txt`, or set `INSTALL_LOCAL_MODELS=true` before building Docker images. Hosted or OpenAI-compatible HTTP providers do not need those large model dependencies.
+Services bind to loopback by default. The API runs as an unprivileged container user and includes its migrations. Before the API and worker start, `storage-init` gives that user ownership of the managed upload volume, including uploads written by older containers running as root. This one-time startup service has no network and does not mount the external books folder.
+
+In-process local embeddings/reranking are optional: install `apps/api/requirements-local.txt`, or set `INSTALL_LOCAL_MODELS=true` before building Docker images. Hosted or OpenAI-compatible HTTP providers do not need those large model dependencies.
 
 ## Automated checks
 
