@@ -26,6 +26,10 @@ interface Props {
   readingPosition?: ReaderPosition;
   enabled: boolean;
   onEnable: () => void;
+  enabling?: boolean;
+  enableError?: string | null;
+  connectionRequired: boolean;
+  onConnect: (after?: () => void) => void;
   onPause: () => void;
   onClose: () => void;
   notes: ReaderNote[];
@@ -42,14 +46,14 @@ interface Props {
 
 const noSpeech = () => undefined;
 
-function CompanionConversation({ sessionId, bookId, selectedText, onClearSelection, onSelectCitation, pageReady, onRetryNotes, selectedQuestion, readingPosition }: Pick<Props, "bookId" | "selectedText" | "onClearSelection" | "onSelectCitation" | "pageReady" | "onRetryNotes" | "readingPosition"> & { sessionId: string; selectedQuestion?: string }) {
+function CompanionConversation({ sessionId, bookId, selectedText, onClearSelection, onSelectCitation, pageReady, onRetryNotes, selectedQuestion, readingPosition, onConnect }: Pick<Props, "bookId" | "selectedText" | "onClearSelection" | "onSelectCitation" | "pageReady" | "onRetryNotes" | "readingPosition" | "onConnect"> & { sessionId: string; selectedQuestion?: string }) {
   const draftKey = `readagain.book.${bookId}.draft`;
   const [input, setInput] = useState(() => { try { return localStorage.getItem(draftKey) || ""; } catch { return ""; } });
   useEffect(() => { try { if (input) localStorage.setItem(draftKey, input); else localStorage.removeItem(draftKey); } catch { /* storage is optional */ } }, [draftKey, input]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const followRef = useRef(true);
-  const { messages, sending, loading, session, error, submitMessage, loadSession } = useDiscussionSession({ sessionId, experienceMode: "text", onSentenceReady: noSpeech, startAutomatically: false, includeCloseReader: false, readingPosition });
+  const { messages, sending, loading, session, error, connectionRequired, submitMessage, loadSession } = useDiscussionSession({ sessionId, experienceMode: "text", onSentenceReady: noSpeech, startAutomatically: false, includeCloseReader: false, readingPosition });
 
   useEffect(() => {
     if (followRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -74,7 +78,7 @@ function CompanionConversation({ sessionId, bookId, selectedText, onClearSelecti
       </div>)}
       {sending ? <p className="companion-muted" role="status">Sam is with the page…</p> : null}
     </div>
-    {error ? <div className="companion-error" role="alert"><p>{error}</p><button onClick={() => { onRetryNotes(); void loadSession(); }} disabled={sending}>Reconnect companion</button></div> : null}
+    {error ? <div className="companion-error" role="alert"><p>{error}</p><button onClick={() => { if (connectionRequired) onConnect(() => void loadSession()); else { onRetryNotes(); void loadSession(); } }} disabled={sending}>{connectionRequired ? "Connect a reading partner" : "Reconnect companion"}</button></div> : null}
     <form className="companion-form" onSubmit={(event) => { event.preventDefault(); void send(); }}>
       {selectedText ? <div className="companion-selected"><p>“{selectedText}”</p><button type="button" aria-label="Clear selected passage" onClick={onClearSelection}><X size={14} /></button></div> : null}
       <label className="sr-only" htmlFor="companion-question">Your thought or question</label>
@@ -94,7 +98,7 @@ export function ReaderCompanion(props: Props) {
   return <aside hidden={props.hidden} className="reader-companion" aria-label="Reading companion">
     <header className="companion-heading"><div><p className="quiet-eyebrow">Beside the page</p><h2><span className="companion-dot" /> Your reading companion</h2></div><button className="companion-close" onClick={props.onClose} aria-label="Close companion"><X size={18} /></button></header>
     {props.enabled ? <div className="companion-tabs" role="tablist" aria-label="Companion views" onKeyDown={(event) => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? "margin" : event.key === "End" ? "conversation" : tab === "margin" ? "conversation" : "margin"; setTab(next); document.getElementById(`${next}-tab`)?.focus(); }}><button id="margin-tab" role="tab" tabIndex={tab === "margin" ? 0 : -1} aria-selected={tab === "margin"} aria-controls="margin-panel" onClick={() => setTab("margin")}>In the margin {props.notes.length ? <span>{props.notes.length}</span> : null}</button><button id="conversation-tab" role="tab" tabIndex={tab === "conversation" ? 0 : -1} aria-selected={tab === "conversation"} aria-controls="conversation-panel" onClick={() => setTab("conversation")}>Our conversation</button></div> : null}
-    {!props.enabled ? <div className="companion-welcome"><BookOpen size={28} strokeWidth={1.2} /><h3>A second pair of eyes.</h3><p>I’m Sam, your AI reading companion. I can leave a few questions in the margin as you read, and we can talk whenever something catches your attention.</p><button className="reading-button" onClick={props.onEnable}>Read with me <MessageCircle size={16} /></button><p className="companion-muted">Our conversation stays with this book, from chapter to chapter.</p></div> : <>
+    {!props.enabled ? <div className="companion-welcome"><BookOpen size={28} strokeWidth={1.2} /><h3>A second pair of eyes.</h3><p>I’m Sam, your AI reading companion. I can leave a few questions in the margin as you read, and we can talk whenever something catches your attention.</p><button className="reading-button" disabled={props.enabling} onClick={props.onEnable}>{props.enabling ? "Finding a reading partner…" : "Read with me"} <MessageCircle size={16} /></button>{props.enableError ? <p className="companion-error" role="alert">{props.enableError}</p> : null}<p className="companion-muted">Our conversation stays with this book, from chapter to chapter.</p></div> : <>
       <div id="margin-panel" role="tabpanel" aria-labelledby="margin-tab" hidden={tab !== "margin"} className="companion-notes">
         <p className="companion-muted">A few things we could linger on.</p>
         {props.notesLoading ? <p className="companion-muted" role="status"><Loader2 size={14} className="animate-spin inline mr-2" /> Reading this page with you…</p> : null}
@@ -102,12 +106,12 @@ export function ReaderCompanion(props: Props) {
           <button className="margin-quote" onClick={() => props.onSelectNote(note)}><span>{index + 1}</span><q>{note.quote}</q></button><p>{note.question}</p><button className="text-link" onClick={() => { props.onDiscussNote(note); setTab("conversation"); }}>Talk about this <MessageCircle size={13} /></button>
         </div>)}
         {!props.notesLoading && !props.notesError && !props.notes.length ? <p className="companion-muted">No questions in this margin yet. You can select a passage or start with a thought of your own.</p> : null}
-        {props.notesError ? <div className="companion-error" role="alert"><p>{props.notesError}</p><button onClick={props.onRetryNotes}>Try again</button></div> : null}
+        {props.notesError ? <div className="companion-error" role="alert"><p>{props.notesError}</p><button onClick={() => props.connectionRequired ? props.onConnect() : props.onRetryNotes()}>{props.connectionRequired ? "Connect a reading partner" : "Try again"}</button></div> : null}
         <Link href={`/books/${props.bookId}`} className="companion-club">Bring this chapter to the book club <span>↗</span></Link>
         <button className="text-link companion-pause" onClick={props.onPause}>Read on my own for a while</button>
       </div>
       <div id="conversation-panel" role="tabpanel" aria-labelledby="conversation-tab" hidden={tab !== "conversation"} className="companion-chat-panel">
-        {props.sessionId && props.pageReady && props.readingPosition ? <CompanionConversation key={`${props.sessionId}:${props.readingPosition.page}:${props.readingPosition.page_size}:${props.readingPosition.edition_id}`} readingPosition={props.readingPosition} sessionId={props.sessionId} bookId={props.bookId} pageReady={props.pageReady} onRetryNotes={props.onRetryNotes} selectedText={props.selectedText || props.selectedNote?.quote || ""} selectedQuestion={props.selectedNote?.question} onClearSelection={props.onClearSelection} onSelectCitation={props.onSelectCitation} /> : props.notesError ? <div className="companion-error" role="alert"><p>{props.notesError}</p><button onClick={props.onRetryNotes}>Try again</button></div> : <p className="companion-muted" role="status">Finding our place on this page…</p>}
+        {props.sessionId && props.pageReady && props.readingPosition ? <CompanionConversation key={`${props.sessionId}:${props.readingPosition.page}:${props.readingPosition.page_size}:${props.readingPosition.edition_id}`} readingPosition={props.readingPosition} sessionId={props.sessionId} bookId={props.bookId} pageReady={props.pageReady} onRetryNotes={props.onRetryNotes} onConnect={props.onConnect} selectedText={props.selectedText || props.selectedNote?.quote || ""} selectedQuestion={props.selectedNote?.question} onClearSelection={props.onClearSelection} onSelectCitation={props.onSelectCitation} /> : props.notesError ? <div className="companion-error" role="alert"><p>{props.notesError}</p><button onClick={() => props.connectionRequired ? props.onConnect() : props.onRetryNotes()}>{props.connectionRequired ? "Connect a reading partner" : "Try again"}</button></div> : <p className="companion-muted" role="status">Finding our place on this page…</p>}
       </div>
     </>}
   </aside>;

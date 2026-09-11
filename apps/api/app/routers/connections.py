@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..providers.llm.codex_runtime import CodexUnavailable, get_codex_runtime
+from ..providers.readiness import ReadingConnection, chatgpt_status, local_status, reading_connection
 from ..providers.selection import canonical_provider, select_provider
 from ..rate_limit import limiter
 from ..settings import settings
@@ -52,16 +53,10 @@ def login_response(login: dict) -> LoginResponse:
     return LoginResponse(**{key: value for key, value in login.items() if key != "deadline"}, expires_in=max(0, int(login["deadline"] - time.monotonic())))
 
 
-async def chatgpt_status() -> dict:
-    runtime = get_codex_runtime()
-    if not runtime.available:
-        return {"connected": False, "ready": False, "note": "Install the ChatGPT connection runtime, or use the Docker setup."}
-    try:
-        account = await runtime.account()
-        search_note = " Book search uses the OpenAI API separately." if settings.embeddings_provider.lower() == "openai" else " Book search and voice keep their separate provider settings."
-        return {**account, "ready": True, "note": "Uses the Codex access included with your ChatGPT plan. Its usage limits apply." + search_note}
-    except CodexUnavailable as error:
-        return {"connected": False, "ready": False, "note": str(error)}
+@router.post("/providers/reading-status", response_model=ReadingConnection)
+@limiter.limit("40/minute")
+async def reading_status(request: Request, db: Session = Depends(get_db)):
+    return await reading_connection(db)
 
 
 @router.post("/auth/chatgpt/login", response_model=LoginResponse)
@@ -115,6 +110,8 @@ async def activate_provider(request: Request, body: ProviderSelection, db: Sessi
     if provider == "chatgpt":
         status = await chatgpt_status()
         ready = status["connected"]
+    elif provider == "local":
+        ready = (await local_status()).connected
     else:
         ready = {
             "openai": bool(settings.openai_api_key),
@@ -122,7 +119,6 @@ async def activate_provider(request: Request, body: ProviderSelection, db: Sessi
             # OAuth mode has its own server credential validation on use.
             "gemini": bool(settings.gemini_api_key) if gemini_mode != "oauth" else False,
             "grok": bool(settings.grok_api_key),
-            "local": bool(settings.local_llm_base_url),
         }.get(provider, False)
         if provider == "gemini" and gemini_mode == "oauth":
             from ..auth.service import get_current_user, get_google_connection

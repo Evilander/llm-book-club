@@ -21,6 +21,11 @@ def reset_requests():
     return {"ok": True}
 
 
+@app.get("/v1/models")
+def models():
+    return {"data": [{"id": "integration-fixture"}]}
+
+
 @app.post("/v1/embeddings")
 async def embeddings(request: Request):
     payload = await request.json()

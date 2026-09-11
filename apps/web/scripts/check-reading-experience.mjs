@@ -50,6 +50,8 @@ let searchState = 'pending';
 let searchPolls = 0;
 let rejectSearchRefresh = true;
 let rejectSearchPoll = true;
+const readingConnected = () => activeProvider !== 'chatgpt' || chatgptConnected;
+const connectionFailure = { detail: { code: 'reading_connection_required', provider: 'chatgpt', connected: false, message: 'Connect ChatGPT to continue.' } };
 const loginFixture = () => ({ login_id: 'fixture-login', state: chatgptLoginState, user_code: chatgptLoginState === 'pending' ? 'TEST-CODE' : null, verification_url: chatgptLoginState === 'pending' ? 'https://auth.openai.com/codex/device' : null, expires_in: 600 });
 async function fixture(context) {
   await context.route('**/v1/**', async route => {
@@ -70,7 +72,9 @@ async function fixture(context) {
       if (failCompanionEdition) { failCompanionEdition = false; return json({ detail: 'This book has changed.' }, 409); }
       return json({ session_id: 'companion', remembered_turns: histories.companion.length, reading_position: { page: req.postDataJSON().page, page_size: req.postDataJSON().page_size, edition_id: 'e'.repeat(64) } });
     }
+    if (path === '/v1/providers/reading-status') return json({ provider: activeProvider, connected: readingConnected(), message: 'Connect ChatGPT to continue.' });
     if (path.endsWith('/reader-notes')) {
+      if (!readingConnected()) return json(connectionFailure, 409);
       const p = req.postDataJSON().page, current = pageData(p, req.postDataJSON().page_size);
       const quote = current.text.includes(quote1) ? quote1 : current.text.trim().split(/[.!?]/)[0] + (current.text.includes('.') ? '.' : '');
       const start = current.char_start + current.text.indexOf(quote);
@@ -98,7 +102,13 @@ async function fixture(context) {
       const [, id, suffix] = sessionMatch;
       if (!suffix) return json({ session_id: id, book_id: 'garden', sections, current_phase: 'discussion', mode: 'conversation', is_active: true, preferences: { experience_mode: 'text', discussion_style: 'cozy' } });
       if (suffix === '/messages') return json({ messages: histories[id] });
+      if (suffix === '/start-discussion') {
+        if (!readingConnected()) return json(connectionFailure, 409);
+        if (!histories[id].length) histories[id].push({ id: 'opening', role: 'facilitator', content: 'Where would you like to begin with this chapter?', citations: [], created_at: new Date().toISOString() });
+        return json({ messages: histories[id] });
+      }
       if (suffix === '/message/stream') {
+        if (!readingConnected()) return json(connectionFailure, 409);
         const content = 'I remember your thought about the garden making room for change. The contrast with the house gives that idea a little more weight. What would it mean for Eleanor to let the gate stand open?';
         const msg = { id: `saved-${histories[id].length}`, role: 'facilitator', content, citations: [cite], created_at: new Date().toISOString() };
         histories[id].push({ id: `user-${histories[id].length}`, role: 'user', content: req.postDataJSON().content, citations: [], created_at: new Date().toISOString() }, msg);
@@ -132,7 +142,24 @@ await page.goto(base); await page.getByRole('heading', { name: 'Your library', e
 await page.getByRole('heading', { name: 'The Garden at Evening', exact: true }).first().waitFor();
 await page.screenshot({ path: `${output}/landing.png`, fullPage: true });
 await page.goto(`${base}/books/garden/read`);
+// A fresh reader connects in place and can cancel without starting a companion.
+activeProvider = 'chatgpt'; chatgptConnected = false;
+await page.waitForURL('**?page=1&size=*');
+const readingUrl = page.url();
 await page.getByRole('button', { name: /Read with me/ }).click();
+await page.getByRole('dialog', { name: 'A partner beside the page' }).waitFor();
+await page.getByRole('button', { name: 'Connect & read with ChatGPT' }).waitFor();
+await page.screenshot({ path: `${output}/reader-connect.png`, fullPage: false });
+await page.keyboard.press('Escape');
+assert.equal(page.url(), readingUrl);
+assert.equal(await page.getByRole('dialog').count(), 0);
+await page.waitForFunction(() => document.activeElement?.textContent?.includes('Read with me'), null, { timeout: 2000 });
+await page.getByRole('button', { name: /Read with me/ }).click();
+await page.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'completed';
+await page.getByText('Your reading partner', { exact: true }).waitFor();
+await page.getByRole('button', { name: 'Continue reading', exact: true }).click();
 await page.getByRole('button', { name: /Talk about this/ }).waitFor();
 assert.equal(await page.locator('.passage-mark').first().innerText(), quote1);
 await page.screenshot({ path: `${output}/reader-fresh.png`, fullPage: false });
@@ -166,6 +193,21 @@ await page.getByRole('button', { name: /Talk about this/ }).click();
 await page.getByRole('textbox', { name: 'Your thought or question' }).fill('The garden makes room for change.');
 await page.getByRole('textbox', { name: 'Your thought or question' }).press('ArrowRight');
 assert.match(page.url(), /page=1/);
+// A lost connection rejects the turn before acceptance and preserves the selected quote and draft.
+chatgptConnected = false;
+const selectedPassage = await page.locator('.companion-selected p').innerText();
+await page.getByRole('button', { name: 'Send to your companion' }).click();
+await page.getByRole('button', { name: 'Connect a reading partner', exact: true }).click();
+assert.equal(histories.companion.length, 0, 'a missing connection has not saved the submitted thought');
+await page.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'completed';
+await page.getByText('Your reading partner', { exact: true }).waitFor();
+await page.getByRole('button', { name: 'Continue reading', exact: true }).click();
+await page.getByRole('textbox', { name: 'Your thought or question' }).waitFor();
+assert.equal(await page.getByRole('textbox', { name: 'Your thought or question' }).inputValue(), 'The garden makes room for change.');
+assert.equal(await page.locator('.companion-selected p').innerText(), selectedPassage);
+assert.equal(histories.companion.length, 0, 'reconnecting never sends a retained draft automatically');
 await page.getByRole('button', { name: 'Send to your companion' }).click();
 await page.getByText('I remember your thought about the garden', { exact: false }).waitFor();
 assert.equal(await page.locator('.companion-message.from-companion').count(), 1);
@@ -186,6 +228,18 @@ await page.getByRole('button', { name: 'Try again', exact: true }).click();
 await page.getByRole('textbox', { name: 'Your thought or question' }).waitFor();
 assert.equal(await page.getByRole('textbox', { name: 'Your thought or question' }).inputValue(), 'A thought to carry to the next page.', 'unsent thought survives page changes and a reconnect');
 await page.getByRole('textbox', { name: 'Your thought or question' }).fill('');
+// Background margin generation offers setup without interrupting a page turn.
+chatgptConnected = false;
+await page.reload();
+await page.getByRole('button', { name: 'Connect a reading partner', exact: true }).waitFor();
+assert.equal(await page.getByRole('dialog').count(), 0);
+assert.match(page.url(), /page=2/);
+await page.getByRole('button', { name: 'Connect a reading partner', exact: true }).click();
+await page.getByText('Other reading partners', { exact: true }).click();
+await page.getByRole('button', { name: 'Read with OpenAI', exact: true }).click();
+await page.getByRole('button', { name: 'Continue reading', exact: true }).click();
+await page.getByRole('button', { name: /Talk about this/ }).waitFor();
+assert.match(page.url(), /page=2/);
 await page.getByRole('tab', { name: /In the margin/ }).click();
 await page.getByText('What changes as you stay with this passage?', { exact: true }).waitFor();
 assert.notEqual(await page.locator('.passage-mark').first().innerText(), quote1);
@@ -218,6 +272,7 @@ await page.getByText('The garden lets things change.', { exact: false }).waitFor
 await page.locator('.cite-bracket').first().click();
 await page.locator('.open-book-prose [data-selected="true"]').first().waitFor();
 await page.screenshot({ path: `${output}/book-club.png`, fullPage: false });
+activeProvider = 'openai'; chatgptConnected = false; // Independent Settings lifecycle fixture.
 await page.goto(`${base}/settings`); await page.getByText('Your reading partner', { exact: true }).last().waitFor();
 await page.screenshot({ path: `${output}/settings.png`, fullPage: false });
 const chatgptRow = page.locator('.connection-row').filter({ has: page.getByRole('heading', { name: 'ChatGPT', exact: true }) });
@@ -248,6 +303,20 @@ await page.getByRole('alert').filter({ hasText: 'That sign-in code expired.' }).
 await chatgptRow.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
 await page.getByText('TEST-CODE', { exact: true }).waitFor();
 await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+// An empty book club opening can reconnect without creating a second session.
+const clubHistory = histories.club;
+histories.club = [];
+await page.goto(`${base}/books/garden/sessions/club`);
+await page.getByRole('button', { name: 'Connect a reading partner', exact: true }).click();
+await page.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await page.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'completed';
+await page.getByText('Your reading partner', { exact: true }).waitFor();
+await page.getByRole('button', { name: 'Continue reading', exact: true }).click();
+await page.getByText('Where would you like to begin with this chapter?', { exact: true }).waitFor();
+assert.equal(histories.club.length, 1);
+histories.club = clubHistory;
+chatgptConnected = false;
 const mobile = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
 await fixture(mobile);
 const phone = await mobile.newPage(); phone.on('pageerror', e => errors.push(e.message));
@@ -259,6 +328,20 @@ await phone.screenshot({ path: `${output}/reader-mobile.png`, fullPage: false })
 await phone.getByRole('button', { name: 'Toggle reading companion' }).click();
 await phone.getByRole('dialog').waitFor();
 await phone.getByRole('button', { name: /Read with me/ }).click();
+await phone.getByRole('dialog', { name: 'A partner beside the page' }).waitFor();
+await phone.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await phone.getByText('TEST-CODE', { exact: true }).waitFor();
+await phone.screenshot({ path: `${output}/reader-connect-mobile.png`, fullPage: false });
+assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+await phone.getByRole('button', { name: 'Cancel', exact: true }).click();
+await phone.getByRole('button', { name: 'Close connection settings' }).click();
+assert.equal(await phone.getByRole('dialog').count(), 1, 'closing connection setup returns to the mobile companion');
+await phone.getByRole('button', { name: /Read with me/ }).click();
+await phone.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
+await phone.getByText('TEST-CODE', { exact: true }).waitFor();
+chatgptLoginState = 'completed';
+await phone.getByText('Your reading partner', { exact: true }).waitFor();
+await phone.getByRole('button', { name: 'Continue reading', exact: true }).click();
 await phone.getByRole('button', { name: /Talk about this/ }).waitFor();
 await phone.screenshot({ path: `${output}/companion-mobile.png`, fullPage: false });
 await phone.getByRole('button', { name: 'Close companion' }).click();
@@ -276,6 +359,7 @@ await phone.getByRole('dialog').waitFor();
 await phone.locator('.open-book-prose [data-selected="true"]').first().waitFor();
 await phone.getByRole('button', { name: 'Close book panel' }).click();
 assert.equal(await phone.getByRole('dialog').count(), 0);
+chatgptConnected = false;
 await phone.goto(`${base}/settings`);
 await phone.getByRole('button', { name: 'Connect & read with ChatGPT' }).click();
 await phone.getByText('TEST-CODE', { exact: true }).waitFor();

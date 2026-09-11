@@ -1,6 +1,6 @@
 # Connect ChatGPT
 
-Open **Settings → Connect & read with ChatGPT**, copy the displayed code, and follow **Continue at OpenAI**. Approve the connection there. The library selects ChatGPT after sign-in completes; the choice survives restarts. Cancelled or expired sign-ins leave the previous provider selected.
+Choose **Read with me** beside a book, or open **Settings → Connect & read with ChatGPT**, copy the displayed code, and follow **Continue at OpenAI**. Approve the connection there. The library selects ChatGPT after sign-in completes; the choice survives restarts. Choose **Continue reading** to return to the same page and draft. Cancelled or expired sign-ins leave the previous provider selected. If a connection is missing during a discussion, **Connect a reading partner** opens the same setup without leaving the book.
 
 This uses the Codex access available to your ChatGPT account and its usage limits. If OpenAI requests it, enable device-code sign-in in your ChatGPT security settings. Availability can depend on your plan and workspace policy. The connection uses OpenAI's managed [App Server authentication flow](https://learn.chatgpt.com/docs/app-server), described further in the [authentication documentation](https://learn.chatgpt.com/docs/auth).
 
@@ -39,3 +39,11 @@ Disconnecting removes the local runtime connection and stops its active API-proc
 App Server does not expose an output-token cap or sampling temperature in this protocol. ReadAgain applies a response-character limit, a default 90-second turn timeout, and interruption on cancelled requests. These limit runaway work but are not a precise token or spending cap. Reported usage comes from the runtime's actual token counts. ChatGPT plan limits continue to apply.
 
 The test suite covers device-code state, expiry, first-party request checks, provider persistence, cancellation, queue isolation, and the browser flow. The packaged-runtime check uses a synthetic local model response and confirms streaming, usage, separate book contexts, absence of native rollouts, and the exposed tool set. It does not establish live account access, model quality, or real-provider latency.
+
+## Local models and connection checks
+
+For a local model server, set `LLM_PROVIDER=local`, `LOCAL_LLM_BASE_URL` to its OpenAI-compatible `/v1` endpoint, and `LOCAL_LLM_MODEL` to an installed model ID. The default is `llama3.2`. Explicit IDs, including `gpt-oss` variants, are passed through unchanged. With the bundled Ollama service, run `docker compose --profile local up -d ollama` and `docker compose exec ollama ollama pull llama3.2` (substitute your chosen model) before selecting **Local model** in Settings. These variables can also be set in the repository-root Compose `.env` when overriding Docker defaults.
+
+Connection checks read the local server's [`/v1/models` list](https://docs.ollama.com/api/openai-compatibility); they do not load a model or generate text. An absent server or missing model offers setup instead of showing a connected badge. API-key providers are checked for configuration only, without billable validation requests. A configured key or reachable local model can still encounter account, capacity, or inference errors during a reply.
+
+`POST /v1/providers/reading-status` returns `{provider, connected, message}` with the same first-party header and Origin checks as connection changes. Generative reading endpoints return HTTP 409 with `detail.code = "reading_connection_required"` when prerequisites are missing, before saving a new reader turn or opening an SSE stream. Page/edition conflicts keep their existing response. Cached margin notes and saved conversation history remain readable without a model connection. A failure after a turn has started still requires checking the saved conversation before retrying.

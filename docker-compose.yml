@@ -59,7 +59,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg://bookclub:bookclub@db:5432/bookclub
       - REDIS_URL=redis://redis:6379/0
-      - LOCAL_LLM_BASE_URL=http://ollama:11434/v1
+      - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-http://ollama:11434/v1}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.2}
       - BOOKS_DIR=/books
     env_file:
       - ./apps/api/.env
@@ -95,7 +96,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg://bookclub:bookclub@db:5432/bookclub
       - REDIS_URL=redis://redis:6379/0
-      - LOCAL_LLM_BASE_URL=http://ollama:11434/v1
+      - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-http://ollama:11434/v1}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-llama3.2}
       - BOOKS_DIR=/books
     env_file:
       - ./apps/api/.env

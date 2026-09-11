@@ -28,6 +28,7 @@ def chatgpt_peer(monkeypatch):
     peer.login_status = AsyncMock(return_value={"login_id": "fixture-login", "state": "completed", "deadline": time.monotonic() + 600})
     peer.logout = AsyncMock()
     monkeypatch.setattr("app.routers.connections.get_codex_runtime", lambda: peer)
+    monkeypatch.setattr("app.providers.readiness.get_codex_runtime", lambda: peer)
     return peer
 
 

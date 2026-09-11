@@ -23,6 +23,7 @@ import {
 } from "@/components/lamplight";
 import { API_BASE, cn } from "@/lib/utils";
 import { useAudioPlayback } from "@/hooks/use-audio-playback";
+import { ReadingConnectionDialog } from "@/components/reading-connection-dialog";
 import { useDiscussionSession } from "@/hooks/use-discussion-session";
 import type {
   CitationData,
@@ -585,6 +586,8 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     [enqueueSpeech]
   );
 
+  const [connectionOpen, setConnectionOpen] = useState(false);
+
   const {
     session,
     setSession,
@@ -595,6 +598,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
     activeAgent,
     activeMessageId,
     error,
+    connectionRequired,
     loadSession,
     sessionTime,
     submitMessage: rawSubmitMessage,
@@ -935,7 +939,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
             </p>
           ) : null}
 
-          {error ? <div className="companion-error" role="alert"><p>{error}</p><button disabled={sending} onClick={() => void loadSession()}>Refresh conversation</button></div> : null}
+          {error ? <div className="companion-error" role="alert"><p>{error}</p><button disabled={sending} onClick={() => connectionRequired ? setConnectionOpen(true) : void loadSession()}>{connectionRequired ? "Connect a reading partner" : "Refresh conversation"}</button></div> : null}
 
           {/* Spark deck — appears at end so user can hand the room a prompt */}
           {messages.length > 0 && messages.length < 3 && !sending ? (
@@ -1027,6 +1031,7 @@ export function DiscussionStage({ sessionId, onBack }: DiscussionStageProps) {
         </p>
       </footer>
 
+      <ReadingConnectionDialog open={connectionOpen} onOpenChange={setConnectionOpen} onReady={() => void loadSession()} />
       {/* ── Mobile drawer for the book panel ──────────────────────────── */}
       <Dialog.Root open={mobile && bookDrawerOpen} onOpenChange={setBookDrawerOpen}>
         <Dialog.Portal><Dialog.Overlay className="reading-dialog-scrim" /><Dialog.Content className="club-book-drawer" aria-describedby={undefined}>

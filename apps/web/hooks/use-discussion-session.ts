@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_BASE } from "@/lib/utils";
+import { needsReadingConnection, ReadingConnectionRequired } from "@/lib/reading-connection";
 import { readEventStream } from "@/lib/event-stream";
 import type { CitationData, Message, SessionData } from "@/types/api";
 
@@ -56,6 +57,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
   const [sending, setSending] = useState(false);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [sessionTime, setSessionTime] = useState(0);
+  const [connectionRequired, setConnectionRequired] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
   const startedRef = useRef(false);
@@ -80,6 +82,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
     loadController.current = controller;
     setLoading(true);
     setError(null);
+    setConnectionRequired(false);
     try {
       const [sessionRes, messagesRes] = await Promise.all([
         fetch(`${API_BASE}/v1/sessions/${sessionId}`, { signal: controller.signal }),
@@ -104,7 +107,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
         setSending(true);
         setActiveAgent("facilitator");
         const res = await fetch(`${API_BASE}/v1/sessions/${sessionId}/start-discussion`, { method: "POST", signal: controller.signal });
-        if (!res.ok) { startedRef.current = false; throw new Error("start"); }
+        if (!res.ok) { startedRef.current = false; if (needsReadingConnection(await res.json().catch(() => null))) throw new ReadingConnectionRequired(); throw new Error("start"); }
         // Reload canonical IDs, including on older start-discussion responses.
         const saved = await fetch(`${API_BASE}/v1/sessions/${sessionId}/messages${positionQuery}`, { signal: controller.signal });
         if (!saved.ok) throw new Error("history");
@@ -116,8 +119,11 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
         }
       }
       return sessionData;
-    } catch {
-      if (!controller.signal.aborted) setError("The conversation couldn’t be loaded. Please try again.");
+    } catch (failure) {
+      if (!controller.signal.aborted) {
+        setConnectionRequired(failure instanceof ReadingConnectionRequired);
+        setError(failure instanceof ReadingConnectionRequired ? failure.message : "The conversation couldn’t be loaded. Please try again.");
+      }
       return null;
     } finally {
       if (!controller.signal.aborted) {
@@ -141,6 +147,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
     sendingRef.current = true;
     setSending(true);
     setError(null);
+    setConnectionRequired(false);
     const controller = new AbortController();
     streamController.current = controller;
     const optimisticId = `user-${crypto.randomUUID()}`;
@@ -160,6 +167,7 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
       });
       if (!response.ok || !response.body) {
         const data = await response.json().catch(() => null);
+        if (needsReadingConnection(data)) throw new ReadingConnectionRequired();
         if (typeof data?.detail === "string" && data.detail.includes("Session message limit")) throw new Error("session-limit");
         if (response.status === 409 && readingPosition) throw new Error("page-changed");
         throw new Error("send");
@@ -218,7 +226,8 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
       return !agentFailed;
     } catch (failure) {
       if (!controller.signal.aborted) {
-        setError(failure instanceof Error && failure.message === "session-limit" ? "This conversation is full. Reconnect your companion to continue with your saved book memory." : failure instanceof Error && failure.message === "page-changed" ? "The book has changed. Reconnect your companion to reopen this page and find our place." : accepted ? "The reply was interrupted. Refresh the conversation to check what was saved before sending again." : "Your message couldn’t be sent. Check your connection and try again.");
+        setConnectionRequired(failure instanceof ReadingConnectionRequired);
+        setError(failure instanceof ReadingConnectionRequired ? failure.message : failure instanceof Error && failure.message === "session-limit" ? "This conversation is full. Reconnect your companion to continue with your saved book memory." : failure instanceof Error && failure.message === "page-changed" ? "The book has changed. Reconnect your companion to reopen this page and find our place." : accepted ? "The reply was interrupted. Refresh the conversation to check what was saved before sending again." : "Your message couldn’t be sent. Check your connection and try again.");
         if (!accepted) setMessages((prev) => prev.filter((message) => message.id !== optimisticId));
       }
       return false;
@@ -232,5 +241,5 @@ export function useDiscussionSession({ sessionId, experienceMode, onSentenceRead
     }
   }
 
-  return { session, setSession, bookTitle, messages, loading, sending, activeAgent, activeMessageId, sessionTime, error, loadSession, submitMessage };
+  return { session, setSession, bookTitle, messages, loading, sending, activeAgent, activeMessageId, sessionTime, error, connectionRequired, loadSession, submitMessage };
 }

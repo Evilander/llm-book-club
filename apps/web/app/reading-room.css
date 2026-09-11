@@ -456,3 +456,21 @@ button:disabled { cursor: not-allowed; }
 .bionic-setting .lite-rail-toggle.is-on .lite-rail-knob { left: 21px; }
 
 .lite-reader[class] .lite-prose p:first-of-type::first-letter { color: inherit; }
+
+/* Connection setup stays over the current page, including inside the mobile drawer. */
+.connection-dialog-scrim { z-index: 90; }
+.reading-connection-dialog { position: fixed; z-index: 100; inset: 50% auto auto 50%; transform: translate(-50%, -50%); width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; padding: 30px; border: 1px solid var(--reading-line); border-radius: 8px; background: var(--reading-paper); color: var(--reading-ink); box-shadow: 0 14px 65px #28332928; font-family: var(--reading-ui); }
+.connection-dialog-intro { margin: 12px 0 24px; color: var(--reading-muted); font: 15px/1.7 var(--reading-ui); }
+.reading-connection-dialog .connection-row { gap: 18px; padding: 22px 0; }
+.reading-connection-dialog .settings-memory { margin-top: 24px; padding: 20px; }
+.reading-connection-dialog .settings-memory h3 { font-size: 22px; }
+.connection-alternatives > summary { cursor: pointer; padding: 18px 0; color: var(--reading-muted); font-size: 14px; }
+.connection-return { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-top: 22px; }
+.connection-return .connection-error { flex-basis: 100%; color: #984338; font-size: 14px; }
+.connection-return > a { flex-basis: 100%; font-size: 13px; }
+@media (max-width: 560px) {
+  .reading-connection-dialog { padding: 22px; }
+  .reading-connection-dialog .connection-row { flex-direction: column; }
+  .reading-connection-dialog .preferences-heading { gap: 14px; align-items: flex-start; }
+  .reading-connection-dialog .preferences-heading h2 { font-size: 24px; }
+}

@@ -7,6 +7,9 @@ import { ArrowLeft, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-r
 import { API_BASE, cn } from "@/lib/utils";
 import type { CitationData } from "@/types/api";
 import type { ReaderPosition } from "@/hooks/use-discussion-session";
+import { ReadingConnectionDialog } from "@/components/reading-connection-dialog";
+import { connectionRequest } from "@/components/chatgpt-connection";
+import { needsReadingConnection, ReadingConnectionRequired } from "@/lib/reading-connection";
 import { ReaderCompanion, type ReaderNote } from "@/components/reader-companion";
 
 export type ReaderTheme = "cream-daylight" | "aged-paper" | "archive-paper" | "paper-white" | "lamplight-dark";
@@ -118,6 +121,14 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
   const [railOpen, setRailOpen] = useState(false);
   const [companionOpen, setCompanionOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const [connectionRequired, setConnectionRequired] = useState(false);
+  const [enabling, setEnabling] = useState(false);
+  const [enableError, setEnableError] = useState<string | null>(null);
+  const [notesAttempt, setNotesAttempt] = useState(0);
+  const afterConnection = useRef<(() => void) | undefined>(undefined);
+  const enableRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => enableRequest.current?.abort(), []);
   const [enabled, setEnabled] = useState(false);
   const [readingPosition, setReadingPosition] = useState<ReaderPosition | undefined>(undefined);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -238,7 +249,7 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
     const sectionIds = [...new Set(currentPage.chunks?.map((chunk) => chunk.section_id) || (currentPage.current_section_id ? [currentPage.current_section_id] : []))];
     if (!sectionIds.length) { setNotesError("This page doesn’t have a reading section yet."); return; }
     const controller = new AbortController();
-    setNotesLoading(true); setNotesError(null);
+    setNotesLoading(true); setNotesError(null); setConnectionRequired(false);
     const timeout = setTimeout(async () => {
       try {
         const response = await fetch(`${API_BASE}/v1/books/${bookId}/companion`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section_ids: sectionIds, page: currentPage.page, page_size: currentPage.page_size, edition_id: currentPage.edition_id }), signal: controller.signal });
@@ -251,6 +262,7 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
         setReadingPosition(companion.reading_position);
         setPageReady(true);
         const noteRes = await fetch(`${API_BASE}/v1/books/${bookId}/reader-notes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: companion.session_id, page: currentPage.page, page_size: currentPage.page_size, edition_id: companion.reading_position.edition_id }), signal: controller.signal });
+        if (!noteRes.ok && needsReadingConnection(await noteRes.clone().json().catch(() => null))) throw new ReadingConnectionRequired();
         if (noteRes.status === 409) throw new Error("page-changed");
         if (!noteRes.ok) throw new Error("notes");
         const data = await noteRes.json();
@@ -261,13 +273,14 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
         if (!controller.signal.aborted) {
           const changed = failure instanceof Error && failure.message === "page-changed";
           if (changed) setPageReady(false);
-          setNotesError(changed ? "The book has changed. Try again to reopen this page and find our place." : "I couldn’t leave questions on this page just yet. You can still read or try again.");
+          setConnectionRequired(failure instanceof ReadingConnectionRequired);
+          setNotesError(failure instanceof ReadingConnectionRequired ? failure.message : changed ? "The book has changed. Try again to reopen this page and find our place." : "I couldn’t leave questions on this page just yet. You can still read or try again.");
         }
       }
       finally { if (!controller.signal.aborted) setNotesLoading(false); }
     }, 700);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [bookId, enabled, page, loading]);
+  }, [bookId, enabled, page, loading, notesAttempt]);
 
   const turnPage = useCallback((direction: "left" | "right") => {
     if (!page || loading || turning || pendingTurn.current) return;
@@ -309,7 +322,32 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
       else { const chars = Array.from(page?.text || ""); if (chars.slice(quote.char_start - (page?.char_start || 0), quote.char_end - (page?.char_start || 0)).join("") === quote.quote) setCitationHighlight(quote); setSelectedText(citation.text); }
     } catch { setNotesError("The quoted passage couldn’t be opened. Its text is still in our conversation."); }
   }
-  const companion = <ReaderCompanion hidden={!mobile && !companionOpen} bookId={bookId} sessionId={sessionId} readingPosition={readingPosition} pageReady={pageReady && !loading} enabled={enabled} onEnable={() => { setEnabled(true); try { localStorage.setItem(`readagain.book.${bookId}.companion`, "on"); } catch { /* no storage */ } }} onPause={() => { setEnabled(false); setNotes([]); setNotesLoading(false); setPageReady(false); try { localStorage.removeItem(`readagain.book.${bookId}.companion`); } catch { /* no storage */ } }} onClose={() => setCompanionOpen(false)} notes={notes} notesLoading={notesLoading} notesError={notesError} onRetryNotes={() => setAttempt((n) => n + 1)} selectedNote={selectedNote} selectedText={selectedText} onClearSelection={() => { setSelectedNote(null); setSelectedText(""); setCitationHighlight(null); }} onSelectNote={selectNote} onDiscussNote={(note) => { setSelectedNote(note); setSelectedText(note.quote); }} onSelectCitation={(citation) => void selectCitation(citation)} />;
+  function enableCompanion() {
+    setEnabled(true);
+    setEnableError(null);
+    setConnectionRequired(false);
+    setNotesAttempt(n => n + 1);
+    try { localStorage.setItem(`readagain.book.${bookId}.companion`, "on"); } catch { /* storage is optional */ }
+  }
+
+  async function startReadingTogether() {
+    if (enabling) return;
+    const controller = new AbortController();
+    enableRequest.current?.abort();
+    enableRequest.current = controller;
+    setEnabling(true);
+    setEnableError(null);
+    try {
+      const status = await connectionRequest<{ connected: boolean }>("providers/reading-status", {}, controller.signal);
+      if (controller.signal.aborted) return;
+      if (status.connected) enableCompanion();
+      else { afterConnection.current = undefined; setConnectionOpen(true); }
+    } catch {
+      if (!controller.signal.aborted) setEnableError("The reading service is unavailable. Please try again in a moment.");
+    } finally { if (!controller.signal.aborted) setEnabling(false); }
+  }
+
+  const companion = <ReaderCompanion hidden={!mobile && !companionOpen} bookId={bookId} sessionId={sessionId} readingPosition={readingPosition} pageReady={pageReady && !loading} enabled={enabled} onEnable={() => void startReadingTogether()} enabling={enabling} enableError={enableError} onConnect={(after) => { afterConnection.current = after; setConnectionOpen(true); }} connectionRequired={connectionRequired} onPause={() => { setEnabled(false); setNotes([]); setNotesLoading(false); setPageReady(false); try { localStorage.removeItem(`readagain.book.${bookId}.companion`); } catch { /* no storage */ } }} onClose={() => setCompanionOpen(false)} notes={notes} notesLoading={notesLoading} notesError={notesError} onRetryNotes={() => setAttempt((n) => n + 1)} selectedNote={selectedNote} selectedText={selectedText} onClearSelection={() => { setSelectedNote(null); setSelectedText(""); setCitationHighlight(null); }} onSelectNote={selectNote} onDiscussNote={(note) => { setSelectedNote(note); setSelectedText(note.quote); }} onSelectCitation={(citation) => void selectCitation(citation)} />;
 
   return <div className={cn("lite-reader", `lite-${prefs.theme}`, `lite-font-${prefs.font_family}`, companionOpen && !mobile && "with-companion")}
     style={{ "--lite-fs": `${prefs.font_size_px}px`, "--lite-lh": prefs.line_height, "--lite-measure": `${prefs.measure_ch}ch` } as React.CSSProperties}>
@@ -337,6 +375,7 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
       {selectedText ? <button className="reading-button secondary discuss-selection" onClick={() => setCompanionOpen(true)}>Discuss selected passage <MessageCircle size={15} /></button> : null}
       <p className="reader-place-note">Your place is saved on this device.</p>
     </div>{!mobile ? companion : null}</div>
+    <ReadingConnectionDialog open={connectionOpen} onOpenChange={setConnectionOpen} onReady={() => { enableCompanion(); afterConnection.current?.(); afterConnection.current = undefined; }} />
     <Dialog.Root open={mobile && companionOpen} onOpenChange={setCompanionOpen}><Dialog.Portal><Dialog.Overlay className="reading-dialog-scrim" /><Dialog.Content className="companion-drawer" aria-describedby={undefined}><Dialog.Title className="sr-only">Your reading companion</Dialog.Title>{companion}</Dialog.Content></Dialog.Portal></Dialog.Root>
     <Dialog.Root open={railOpen} onOpenChange={setRailOpen}><Dialog.Portal><Dialog.Overlay className="reading-dialog-scrim" /><Dialog.Content className="reading-preferences" aria-describedby={undefined}>
       <div className="preferences-heading"><Dialog.Title>Paper & type</Dialog.Title><Dialog.Close aria-label="Close reading settings"><X size={19} /></Dialog.Close></div>

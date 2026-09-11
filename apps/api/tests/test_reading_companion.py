@@ -101,7 +101,8 @@ def test_margin_questions_are_cached_and_hidden_from_conversation(client, popula
     llm = SimpleNamespace(complete=AsyncMock(return_value=json.dumps({"notes": [{"quote": "Moonlight pressed against the glass", "question": "What does this light make you feel?"}]})))
     with patch("app.routers.companion.get_llm_client", return_value=llm):
         first = client.post(f"/v1/books/{populated_book.id}/reader-notes", json={"session_id": session, "page": 1})
-        second = client.post(f"/v1/books/{populated_book.id}/reader-notes", json={"session_id": session, "page": 1})
+        with patch("app.routers.companion.require_reading_connection", AsyncMock(side_effect=AssertionError("Cached notes must work offline"))):
+            second = client.post(f"/v1/books/{populated_book.id}/reader-notes", json={"session_id": session, "page": 1})
     assert first.status_code == 200, first.text
     assert len(first.json()["notes"]) == 1 and first.json()["cached"] is False
     assert second.json()["cached"] is True
