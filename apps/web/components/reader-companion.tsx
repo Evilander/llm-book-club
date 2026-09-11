@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import { ArrowUp, BookOpen, Loader2, MessageCircle, X } from "lucide-react";
-import { useDiscussionSession } from "@/hooks/use-discussion-session";
+import { useDiscussionSession, type ReaderPosition } from "@/hooks/use-discussion-session";
 import type { CitationData } from "@/types/api";
 
 export interface ReaderNote {
@@ -23,6 +23,7 @@ interface Props {
   hidden?: boolean;
   sessionId: string | null;
   pageReady: boolean;
+  readingPosition?: ReaderPosition;
   enabled: boolean;
   onEnable: () => void;
   onPause: () => void;
@@ -41,14 +42,14 @@ interface Props {
 
 const noSpeech = () => undefined;
 
-function CompanionConversation({ sessionId, bookId, selectedText, onClearSelection, onSelectCitation, pageReady, onRetryNotes, selectedQuestion }: Pick<Props, "bookId" | "selectedText" | "onClearSelection" | "onSelectCitation" | "pageReady" | "onRetryNotes"> & { sessionId: string; selectedQuestion?: string }) {
+function CompanionConversation({ sessionId, bookId, selectedText, onClearSelection, onSelectCitation, pageReady, onRetryNotes, selectedQuestion, readingPosition }: Pick<Props, "bookId" | "selectedText" | "onClearSelection" | "onSelectCitation" | "pageReady" | "onRetryNotes" | "readingPosition"> & { sessionId: string; selectedQuestion?: string }) {
   const draftKey = `readagain.book.${bookId}.draft`;
   const [input, setInput] = useState(() => { try { return localStorage.getItem(draftKey) || ""; } catch { return ""; } });
   useEffect(() => { try { if (input) localStorage.setItem(draftKey, input); else localStorage.removeItem(draftKey); } catch { /* storage is optional */ } }, [draftKey, input]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const followRef = useRef(true);
-  const { messages, sending, loading, session, error, submitMessage, loadSession } = useDiscussionSession({ sessionId, experienceMode: "text", onSentenceReady: noSpeech, startAutomatically: false, includeCloseReader: false });
+  const { messages, sending, loading, session, error, submitMessage, loadSession } = useDiscussionSession({ sessionId, experienceMode: "text", onSentenceReady: noSpeech, startAutomatically: false, includeCloseReader: false, readingPosition });
 
   useEffect(() => {
     if (followRef.current && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -106,7 +107,7 @@ export function ReaderCompanion(props: Props) {
         <button className="text-link companion-pause" onClick={props.onPause}>Read on my own for a while</button>
       </div>
       <div id="conversation-panel" role="tabpanel" aria-labelledby="conversation-tab" hidden={tab !== "conversation"} className="companion-chat-panel">
-        {props.sessionId ? <CompanionConversation key={props.sessionId} sessionId={props.sessionId} bookId={props.bookId} pageReady={props.pageReady} onRetryNotes={props.onRetryNotes} selectedText={props.selectedText || props.selectedNote?.quote || ""} selectedQuestion={props.selectedNote?.question} onClearSelection={props.onClearSelection} onSelectCitation={props.onSelectCitation} /> : <p className="companion-muted" role="status">Opening our conversation…</p>}
+        {props.sessionId && props.pageReady && props.readingPosition ? <CompanionConversation key={`${props.sessionId}:${props.readingPosition.page}:${props.readingPosition.page_size}:${props.readingPosition.edition_id}`} readingPosition={props.readingPosition} sessionId={props.sessionId} bookId={props.bookId} pageReady={props.pageReady} onRetryNotes={props.onRetryNotes} selectedText={props.selectedText || props.selectedNote?.quote || ""} selectedQuestion={props.selectedNote?.question} onClearSelection={props.onClearSelection} onSelectCitation={props.onSelectCitation} /> : props.notesError ? <div className="companion-error" role="alert"><p>{props.notesError}</p><button onClick={props.onRetryNotes}>Try again</button></div> : <p className="companion-muted" role="status">Finding our place on this page…</p>}
       </div>
     </>}
   </aside>;

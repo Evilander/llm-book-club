@@ -9,6 +9,7 @@ Token estimation uses the chars/4 heuristic (no external dependency).
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -25,8 +26,8 @@ logger = logging.getLogger(__name__)
 def estimate_tokens(text: str) -> int:
     """Estimate the number of tokens in *text* using the chars/4 heuristic.
 
-    This intentionally over-counts slightly, which is the safe direction
-    for budget enforcement.  For precise counts, swap in tiktoken later.
+    This is an approximation, particularly for non-Latin scripts; it is not
+    a provider token count. Evidence also has a deterministic character cap.
     """
     return max(1, len(text) // 4)
 
@@ -95,21 +96,28 @@ def trim_evidence(
         max_tokens: Maximum estimated token budget for all evidence text.
 
     Returns:
-        A prefix of *results* that fits within the budget.
+        A prefix of *results* that fits within the character allowance. An
+        oversized first result is copied and clipped; sources are not mutated.
     """
     if max_tokens <= 0:
         return results  # disabled
 
     kept: list[SearchResult] = []
     running_tokens = 0
+    running_chars = 0
 
     for result in results:
         chunk_tokens = estimate_tokens(result.text)
-        if running_tokens + chunk_tokens > max_tokens and kept:
-            # Already have at least one result; stop adding
+        if running_chars + len(result.text) > max_tokens * 4:
+            if not kept:
+                from .citation_spans import grapheme_boundaries
+                end = max(n for n in grapheme_boundaries(result.text) if n <= max_tokens * 4)
+                if end:
+                    kept.append(replace(result, text=result.text[:end], char_end=result.char_start + end))
             break
         kept.append(result)
         running_tokens += chunk_tokens
+        running_chars += len(result.text)
 
     if len(kept) < len(results):
         logger.info(

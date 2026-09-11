@@ -33,6 +33,8 @@ services:
     command: ["uvicorn", "fake_provider:app", "--app-dir", "/fixtures", "--host", "0.0.0.0", "--port", "9000"]
     volumes:
       - ./apps/api/integration/fake_provider.py:/fixtures/fake_provider.py:ro
+    ports:
+      - "127.0.0.1:${TEST_PROVIDER_PORT:-59000}:9000"
   migrate:
     <<: *test-api
     command: ["python", "-m", "app.db.init_db"]

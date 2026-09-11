@@ -8,19 +8,22 @@ import re
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from ..db.models import DiscussionSession, Message, MessageRole, Section
+from .reading_scope import ReadingScope
 
 
-def book_recall(db: Session, book_id: str, section_ids: list[str], query: str, exclude_ids: set[str] | None = None) -> str:
+def book_recall(db: Session, book_id: str, section_ids: list[str], query: str, exclude_ids: set[str] | None = None, scope: ReadingScope | None = None) -> str:
     current_sections = db.query(Section).filter(Section.book_id == book_id, Section.id.in_(section_ids)).all()
     if not current_sections:
         return ""
     last_order = max(section.order_index for section in current_sections)
     read_ids = {str(s.id) for s in db.query(Section).filter(Section.book_id == book_id, Section.order_index <= last_order).all()}
     sessions = db.query(DiscussionSession).filter(DiscussionSession.book_id == book_id).all()
-    session_ids = [s.id for s in sessions if set(s.section_ids or []).issubset(read_ids)]
+    session_ids = [s.id for s in sessions if scope is not None or set(s.section_ids or []).issubset(read_ids)]
     if not session_ids:
         return ""
     base = db.query(Message).filter(Message.session_id.in_(session_ids), Message.role == MessageRole.USER)
+    if scope is not None:
+        base = scope.filter_history(base)
     if exclude_ids:
         base = base.filter(Message.id.notin_(exclude_ids))
     words = list(dict.fromkeys(re.findall(r"[^\W_]{4,}", query.lower(), re.UNICODE)))[:10]

@@ -6,6 +6,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowLeft, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-react";
 import { API_BASE, cn } from "@/lib/utils";
 import type { CitationData } from "@/types/api";
+import type { ReaderPosition } from "@/hooks/use-discussion-session";
 import { ReaderCompanion, type ReaderNote } from "@/components/reader-companion";
 
 export type ReaderTheme = "cream-daylight" | "aged-paper" | "archive-paper" | "paper-white" | "lamplight-dark";
@@ -18,7 +19,7 @@ interface ReaderPageData {
   book_id: string; title: string; author: string | null; page: number; page_size: number;
   total_pages: number; total_chars: number; current_section_id: string | null;
   current_section_title: string | null; current_section_order: number | null;
-  text: string; char_start: number; char_end: number;
+  text: string; char_start: number; char_end: number; edition_id: string;
   chunks?: Array<{ chunk_id: string; section_id: string; char_start: number; char_end: number }>;
 }
 const PAPERS: Array<{ id: ReaderTheme; label: string; description: string }> = [
@@ -118,12 +119,12 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
   const [companionOpen, setCompanionOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
   const [enabled, setEnabled] = useState(false);
+  const [readingPosition, setReadingPosition] = useState<ReaderPosition | undefined>(undefined);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pageReady, setPageReady] = useState(false);
   const [notes, setNotes] = useState<ReaderNote[]>([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [notesError, setNotesError] = useState<string | null>(null);
-  const [notesAttempt, setNotesAttempt] = useState(0);
   const [selectedNote, setSelectedNote] = useState<ReaderNote | null>(null);
   const [selectedText, setSelectedText] = useState("");
   const pendingQuote = useRef<ReaderNote | null>(null);
@@ -240,23 +241,33 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
     setNotesLoading(true); setNotesError(null);
     const timeout = setTimeout(async () => {
       try {
-        const response = await fetch(`${API_BASE}/v1/books/${bookId}/companion`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section_ids: sectionIds, page: currentPage.page, page_size: currentPage.page_size }), signal: controller.signal });
+        const response = await fetch(`${API_BASE}/v1/books/${bookId}/companion`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ section_ids: sectionIds, page: currentPage.page, page_size: currentPage.page_size, edition_id: currentPage.edition_id }), signal: controller.signal });
+        if (response.status === 409) throw new Error("page-changed");
         if (!response.ok) throw new Error("companion");
         const companion = await response.json();
         if (controller.signal.aborted) return;
         setSessionId(companion.session_id);
+        if (!companion.reading_position) throw new Error("position");
+        setReadingPosition(companion.reading_position);
         setPageReady(true);
-        const noteRes = await fetch(`${API_BASE}/v1/books/${bookId}/reader-notes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: companion.session_id, page: currentPage.page, page_size: currentPage.page_size }), signal: controller.signal });
+        const noteRes = await fetch(`${API_BASE}/v1/books/${bookId}/reader-notes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: companion.session_id, page: currentPage.page, page_size: currentPage.page_size, edition_id: companion.reading_position.edition_id }), signal: controller.signal });
+        if (noteRes.status === 409) throw new Error("page-changed");
         if (!noteRes.ok) throw new Error("notes");
         const data = await noteRes.json();
         if (controller.signal.aborted) return;
         const chars = Array.from(currentPage.text);
         setNotes((data.notes || []).filter((note: ReaderNote) => note.verified && note.char_start >= currentPage.char_start && note.char_end <= currentPage.char_end && chars.slice(note.char_start - currentPage.char_start, note.char_end - currentPage.char_start).join("") === note.quote));
-      } catch { if (!controller.signal.aborted) setNotesError("I couldn’t leave questions on this page just yet. You can still read or try again."); }
+      } catch (failure) {
+        if (!controller.signal.aborted) {
+          const changed = failure instanceof Error && failure.message === "page-changed";
+          if (changed) setPageReady(false);
+          setNotesError(changed ? "The book has changed. Try again to reopen this page and find our place." : "I couldn’t leave questions on this page just yet. You can still read or try again.");
+        }
+      }
       finally { if (!controller.signal.aborted) setNotesLoading(false); }
     }, 700);
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [bookId, enabled, page, loading, notesAttempt]);
+  }, [bookId, enabled, page, loading]);
 
   const turnPage = useCallback((direction: "left" | "right") => {
     if (!page || loading || turning || pendingTurn.current) return;
@@ -298,7 +309,7 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
       else { const chars = Array.from(page?.text || ""); if (chars.slice(quote.char_start - (page?.char_start || 0), quote.char_end - (page?.char_start || 0)).join("") === quote.quote) setCitationHighlight(quote); setSelectedText(citation.text); }
     } catch { setNotesError("The quoted passage couldn’t be opened. Its text is still in our conversation."); }
   }
-  const companion = <ReaderCompanion hidden={!mobile && !companionOpen} bookId={bookId} sessionId={sessionId} pageReady={pageReady && !loading} enabled={enabled} onEnable={() => { setEnabled(true); try { localStorage.setItem(`readagain.book.${bookId}.companion`, "on"); } catch { /* no storage */ } }} onPause={() => { setEnabled(false); setNotes([]); setNotesLoading(false); setPageReady(false); try { localStorage.removeItem(`readagain.book.${bookId}.companion`); } catch { /* no storage */ } }} onClose={() => setCompanionOpen(false)} notes={notes} notesLoading={notesLoading} notesError={notesError} onRetryNotes={() => setNotesAttempt((n) => n + 1)} selectedNote={selectedNote} selectedText={selectedText} onClearSelection={() => { setSelectedNote(null); setSelectedText(""); setCitationHighlight(null); }} onSelectNote={selectNote} onDiscussNote={(note) => { setSelectedNote(note); setSelectedText(note.quote); }} onSelectCitation={(citation) => void selectCitation(citation)} />;
+  const companion = <ReaderCompanion hidden={!mobile && !companionOpen} bookId={bookId} sessionId={sessionId} readingPosition={readingPosition} pageReady={pageReady && !loading} enabled={enabled} onEnable={() => { setEnabled(true); try { localStorage.setItem(`readagain.book.${bookId}.companion`, "on"); } catch { /* no storage */ } }} onPause={() => { setEnabled(false); setNotes([]); setNotesLoading(false); setPageReady(false); try { localStorage.removeItem(`readagain.book.${bookId}.companion`); } catch { /* no storage */ } }} onClose={() => setCompanionOpen(false)} notes={notes} notesLoading={notesLoading} notesError={notesError} onRetryNotes={() => setAttempt((n) => n + 1)} selectedNote={selectedNote} selectedText={selectedText} onClearSelection={() => { setSelectedNote(null); setSelectedText(""); setCitationHighlight(null); }} onSelectNote={selectNote} onDiscussNote={(note) => { setSelectedNote(note); setSelectedText(note.quote); }} onSelectCitation={(citation) => void selectCitation(citation)} />;
 
   return <div className={cn("lite-reader", `lite-${prefs.theme}`, `lite-font-${prefs.font_family}`, companionOpen && !mobile && "with-companion")}
     style={{ "--lite-fs": `${prefs.font_size_px}px`, "--lite-lh": prefs.line_height, "--lite-measure": `${prefs.measure_ch}ch` } as React.CSSProperties}>

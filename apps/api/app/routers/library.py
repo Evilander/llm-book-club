@@ -16,6 +16,7 @@ from ..db import Book, BookMemory, Chunk, IngestStatus, ReadingUnit, Section, ge
 from ..rate_limit import limiter
 from ..services.reading_progress import choose_section_for_unit
 from ..services.reader_text import assemble_reading_text, page_bounds
+from ..services.reading_scope import load_reading, load_reading_chunks
 from ..services.media_library import (
     ROOT_FOLDER_SENTINEL,
     SUPPORTED_AUDIOBOOK_EXTENSIONS,
@@ -161,6 +162,7 @@ class ReaderChunkSpan(BaseModel):
 
 class ReaderPageResponse(BaseModel):
     book_id: str
+    edition_id: str
     title: str
     author: str | None
     page: int
@@ -937,17 +939,10 @@ def read_book(
         .order_by(Section.order_index)
         .all()
     )
-    chunks = (
-        db.query(Chunk)
-        .join(Section, Chunk.section_id == Section.id)
-        .filter(Chunk.book_id == book_id)
-        .order_by(Section.order_index, Chunk.order_index, Chunk.char_start)
-        .all()
-    )
+    reading, chunks = load_reading(db, book_id)
     if not chunks:
         raise HTTPException(404, "No readable text found for this book")
 
-    reading = assemble_reading_text(chunks)
     full_text = reading.text
     total_chars = len(full_text)
     if total_chars == 0:
@@ -966,6 +961,7 @@ def read_book(
 
     return ReaderPageResponse(
         book_id=str(book.id),
+        edition_id=reading.edition_id,
         title=book.title,
         author=book.author,
         page=page,
@@ -1001,12 +997,7 @@ def explore_book(
     if not sections:
         raise HTTPException(404, "No sections found for this book")
 
-    chunks = (
-        db.query(Chunk)
-        .filter(Chunk.book_id == book_id)
-        .order_by(Chunk.char_start)
-        .all()
-    )
+    chunks = load_reading_chunks(db, book_id)
     chunks_by_section: dict[str, list[Chunk]] = {}
     for chunk in chunks:
         chunks_by_section.setdefault(chunk.section_id, []).append(chunk)
@@ -1066,11 +1057,10 @@ def reader_location(
     page_size: int = Query(1800, ge=200, le=8000),
     db: Session = Depends(get_db),
 ):
-    chunks = db.query(Chunk).join(Section, Chunk.section_id == Section.id).filter(Chunk.book_id == book_id).order_by(Section.order_index, Chunk.order_index, Chunk.char_start).all()
+    reading, chunks = load_reading(db, book_id)
     chunk = next((chunk for chunk in chunks if str(chunk.id) == chunk_id), None)
     if not chunk or char_start >= len(chunk.text):
         raise HTTPException(404, "Passage not found in this book")
-    reading = assemble_reading_text(chunks)
     span = next(span for span in reading.chunks if span["chunk_id"] == chunk_id)
     position = span["char_start"] + char_start
     page = min(ceil(len(reading.text) / page_size), position // page_size + 1)

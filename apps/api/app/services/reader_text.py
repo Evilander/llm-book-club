@@ -4,6 +4,7 @@ Offsets here address the assembled reading text, not the extraction's source
 coordinates. Chunk mappings preserve the link back to verified local citations.
 """
 from dataclasses import dataclass
+import hashlib
 from typing import Protocol
 
 
@@ -19,6 +20,10 @@ class TextChunk(Protocol):
 class ReadingText:
     text: str
     chunks: list[dict]
+
+    @property
+    def edition_id(self) -> str:
+        return hashlib.sha256(self.text.encode()).hexdigest()
 
 
 def assemble_reading_text(chunks: list[TextChunk]) -> ReadingText:

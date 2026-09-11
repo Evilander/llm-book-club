@@ -51,6 +51,7 @@ def test_agent_retrieval_is_slice_bounded(mock_db):
             "What matters here?",
             limit=5,
             section_ids=["section-a", "section-b"],
+            allowed_spans=None,
         )
 
     asyncio.run(run_test())

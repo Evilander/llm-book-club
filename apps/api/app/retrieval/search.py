@@ -6,7 +6,7 @@ import logging
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -56,6 +56,7 @@ async def vector_search(
     query: str,
     limit: int = 20,
     section_ids: list[str] | None = None,
+    chunk_ids: list[str] | None = None,
 ) -> list[SearchResult]:
     """Semantic search using pgvector cosine similarity.
 
@@ -65,7 +66,7 @@ async def vector_search(
     """
     t0 = time.perf_counter()
 
-    if limit <= 0 or section_ids == []:
+    if limit <= 0 or section_ids == [] or chunk_ids == []:
         return []
 
     # Check embedding cache before generating a new embedding
@@ -98,6 +99,8 @@ async def vector_search(
 
     if section_ids:
         sql += "  AND c.section_id = ANY(:section_ids)\n"
+    if chunk_ids is not None:
+        sql += "  AND c.id = ANY(:chunk_ids)\n"
 
     sql += """
             ORDER BY c.embedding::halfvec(3072) <=> CAST(:embedding_vec AS halfvec(3072))
@@ -119,6 +122,8 @@ async def vector_search(
     }
     if section_ids:
         params["section_ids"] = section_ids
+    if chunk_ids is not None:
+        params["chunk_ids"] = chunk_ids
 
     result = db.execute(text(sql), params)
     rows = result.fetchall()
@@ -151,6 +156,7 @@ def fts_search(
     query: str,
     limit: int = 20,
     section_ids: list[str] | None = None,
+    chunk_ids: list[str] | None = None,
 ) -> list[SearchResult]:
     """BM25-style full-text search using PostgreSQL's built-in tsvector/tsquery.
 
@@ -160,7 +166,7 @@ def fts_search(
     """
     t0 = time.perf_counter()
 
-    if limit <= 0 or section_ids == []:
+    if limit <= 0 or section_ids == [] or chunk_ids == []:
         return []
 
     sql = """
@@ -181,12 +187,16 @@ def fts_search(
 
     if section_ids:
         sql += "  AND c.section_id = ANY(:section_ids)\n"
+    if chunk_ids is not None:
+        sql += "  AND c.id = ANY(:chunk_ids)\n"
 
     sql += " ORDER BY score DESC\n LIMIT :limit"
 
     params: dict = {"book_id": book_id, "query": query, "limit": limit}
     if section_ids:
         params["section_ids"] = section_ids
+    if chunk_ids is not None:
+        params["chunk_ids"] = chunk_ids
 
     try:
         # A failed optional FTS branch must not roll back the caller's pending
@@ -278,6 +288,7 @@ async def hybrid_search(
     limit: int = 5,
     section_ids: list[str] | None = None,
     rerank: bool = True,
+    allowed_spans: dict[str, tuple[int, int]] | None = None,
 ) -> list[SearchResult]:
     """Run hybrid search: vector + full-text, merge with RRF, optionally rerank.
 
@@ -289,6 +300,8 @@ async def hybrid_search(
         4. Return the top *limit* results.
     """
     t0 = time.perf_counter()
+    if limit <= 0 or section_ids == [] or allowed_spans == {}:
+        return []
     candidate_k = 20  # candidates per retrieval method
 
     # --- Step 1: candidate generation -----------------------------------------
@@ -296,10 +309,23 @@ async def hybrid_search(
     # NOTE: fts_search MUST NOT run in a thread pool because it shares the
     # same SQLAlchemy session — cross-thread usage corrupts session state
     # if the FTS query fails (e.g. missing text_search column).
+    bounds = {'chunk_ids': list(allowed_spans)} if allowed_spans is not None else {}
     vector_results = await vector_search(
-        db, book_id, query, limit=candidate_k, section_ids=section_ids
+        db, book_id, query, limit=candidate_k, section_ids=section_ids, **bounds
     )
-    fts_results = fts_search(db, book_id, query, candidate_k, section_ids)
+    fts_results = fts_search(db, book_id, query, candidate_k, section_ids, **bounds)
+    if allowed_spans is not None:
+        def clip(results):
+            bounded = []
+            for result in results:
+                start, end = allowed_spans.get(result.chunk_id, (0, 0))
+                if 0 <= start < end <= len(result.text):
+                    bounded.append(replace(result, text=result.text[start:end],
+                                           char_start=result.char_start + start,
+                                           char_end=result.char_start + end))
+            return bounded
+        # No provider, including an optional reranker, receives unread text.
+        vector_results, fts_results = clip(vector_results), clip(fts_results)
 
     logger.debug(
         "Candidate generation: %d vector, %d FTS",
@@ -392,6 +418,7 @@ async def search_chunks(
     query: str,
     limit: int = 5,
     section_ids: list[str] | None = None,
+    allowed_spans: dict[str, tuple[int, int]] | None = None,
 ) -> list[SearchResult]:
     """Search for relevant chunks using hybrid retrieval (vector + FTS + RRF + reranking).
 
@@ -414,6 +441,7 @@ async def search_chunks(
         query,
         limit=limit,
         section_ids=section_ids,
+        allowed_spans=allowed_spans,
     )
 
 

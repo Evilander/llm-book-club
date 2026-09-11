@@ -3,7 +3,7 @@
 Covers:
   - parse_citations (regex-based backward-compatible parser)
   - normalize_text (unicode/whitespace normalization)
-  - verify_citations (exact + fuzzy matching against chunk text in DB)
+  - verify_citations (exact + normalized contiguous matching against chunk text in DB)
   - compute_span_alignment (character-offset span location)
   - citation-to-section-slice validation
 """
@@ -230,51 +230,12 @@ class TestVerifyCitations:
         verified, invalid = verify_citations(mock_db, citations)
         assert len(verified) == 1
 
-    def test_fuzzy_match_threshold(self, mock_db, sample_book):
-        """A quote where most words overlap but it is not an exact substring
-        should be verified as fuzzy if it meets the threshold.
-
-        NOTE: normalize_text does NOT strip punctuation, so 'ribbon,'
-        in the chunk differs from 'ribbon' in the quote. We pick words
-        that appear exactly (after lowercasing) in the normalized chunk text.
-        """
+    def test_reject_unordered_words_even_with_high_overlap(self, mock_db, sample_book):
         chunk = sample_book["chunks"][2]
-        # Normalized chunk words include: the, river, wound, through, the,
-        # valley, like, a, silver, its, waters, carrying, the, stories,
-        # of, a, thousand, on, its, the, willows
-        # (punctuated forms: "ribbon," "years." "banks," "wept." won't match
-        #  their bare forms)
-        # We pick 10 words from the chunk that appear without trailing punctuation
-        # and add 2 that don't exist -> 10/12 = 83% overlap > 80% threshold
-        citations = [
-            {
-                "chunk_id": chunk.id,
-                "text": "the river wound through the valley like a silver waters carrying stories NONEXISTENT1 NONEXISTENT2",
-            }
-        ]
-        verified, invalid = verify_citations(mock_db, citations)
-        # 10 out of 12 unique words overlap (>= 0.8), so should pass as fuzzy
-        # But first check: is it an exact normalized substring? No, because it
-        # has NONEXISTENT words. And it's not a contiguous substring either.
-        if len(verified) == 1:
-            assert verified[0]["match_type"] == "fuzzy"
-        else:
-            # If it didn't pass, the word overlap might be below threshold
-            # due to normalization details; verify by checking the actual overlap
-            norm_chunk = normalize_text(chunk.text)
-            quote = "the river wound through the valley like a silver waters carrying stories NONEXISTENT1 NONEXISTENT2"
-            norm_quote = normalize_text(quote)
-            quote_words = set(norm_quote.split())
-            chunk_words = set(norm_chunk.split())
-            overlap = len(quote_words & chunk_words) / len(quote_words)
-            # If overlap < 0.8, adjust the test expectation
-            if overlap < 0.8:
-                pytest.skip(
-                    f"Fuzzy overlap {overlap:.2f} below threshold 0.8; "
-                    "adjust test quote"
-                )
-            else:
-                pytest.fail(f"Expected fuzzy match with {overlap:.2f} overlap")
+        quote = "the river wound through the valley like a silver waters carrying stories NONEXISTENT1 NONEXISTENT2"
+        verified, invalid = verify_citations(mock_db, [{"chunk_id": chunk.id, "text": quote}])
+        assert not verified
+        assert len(invalid) == 1 and not invalid[0]["verified"]
 
     def test_reject_chunk_outside_allowed_slice(self, mock_db, sample_book):
         """A valid quote should still fail if the chunk is outside the session slice."""
@@ -327,59 +288,29 @@ class TestVerifyCitations:
 # =========================================================================
 
 
-class TestSpanAlignment:
-    """Test finding the character offsets of a quote within chunk text.
-
-    The real function may not be exposed yet -- these tests verify the
-    algorithm using a local helper that mirrors the intended behaviour.
-    """
-
-    @staticmethod
-    def _find_span(chunk_text: str, quote: str):
-        """Simple span finder: returns (start, end) or None."""
-        norm_chunk = normalize_text(chunk_text)
-        norm_quote = normalize_text(quote)
-        idx = norm_chunk.find(norm_quote)
-        if idx == -1:
-            return None
-        return (idx, idx + len(norm_quote))
-
-    def test_exact_span(self):
-        chunk_text = "The morning sun cast long shadows across the empty courtyard."
-        quote = "long shadows across"
-        result = self._find_span(chunk_text, quote)
-        assert result is not None
-        start, end = result
-        # Verify the span extracts the expected text from the normalized chunk
-        norm = normalize_text(chunk_text)
-        assert norm[start:end] == normalize_text(quote)
-
-    def test_span_at_beginning(self):
-        chunk_text = "The morning sun cast long shadows."
-        quote = "the morning sun"
-        result = self._find_span(chunk_text, quote)
-        assert result is not None
-        assert result[0] == 0
-
-    def test_span_at_end(self):
-        chunk_text = "The morning sun cast long shadows."
-        quote = "long shadows."
-        result = self._find_span(chunk_text, quote)
-        assert result is not None
-        norm = normalize_text(chunk_text)
-        assert result[1] == len(norm)
-
-    def test_no_match_returns_none(self):
-        chunk_text = "The morning sun cast long shadows."
-        quote = "This text is not in the chunk at all."
-        result = self._find_span(chunk_text, quote)
+@pytest.mark.parametrize("source, quote, expected", [
+    ("The morning sun cast long shadows.", "long shadows.", "long shadows."),
+    ("The  morning\n\tsun was quiet.", "morning sun", "morning\n\tsun"),
+    ("🌿 Cafe\u0301 at dawn", "CAFÉ", "Cafe\u0301"),
+    ("x \u1100\u1161 y", "가", "\u1100\u1161"),
+    ("That \ufb01eld was still.", "FIELD", "\ufb01eld"),
+    ("A STRASSE near home.", "Straße", "STRASSE"),
+    ("a\u00a0\u2003b then c", "A B", "a\u00a0\u2003b"),
+    ("She did not cross the river.", "She did cross the river.", None),
+    ("one two three", "three two one", None),
+    ("a \ufb01 b", "f", None),
+    ("a \u1100\u1161 b", "ᄀ", None),
+])
+def test_real_span_alignment_preserves_source(source, quote, expected):
+    from app.discussion.agents import compute_span_alignment
+    result = compute_span_alignment(source, quote)
+    if expected is None:
         assert result is None
-
-    def test_span_with_extra_whitespace(self):
-        chunk_text = "The  morning   sun cast long shadows."
-        quote = "morning sun cast"
-        result = self._find_span(chunk_text, quote)
+    else:
         assert result is not None
+        start, end, _ = result
+        assert source[start:end] == expected
+        assert normalize_text(source[start:end]) == normalize_text(quote)
 
 
 # =========================================================================
