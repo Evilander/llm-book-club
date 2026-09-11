@@ -16,6 +16,7 @@ See [development and verification](docs/development.md) for the tested installat
 ## Features
 
 - **Lite Reader** with five paper finishes, four fonts, adjustable Bionic text, saved reading position, keyboard navigation, and mobile swipe.
+- [EPUB typography](docs/epub-reading.md) preserves paragraphs, headings, emphasis, and verse breaks, with formatting recovery for existing books.
 - **Reading companion** with verified margin questions, streamed discussion, and book-level recall across sessions.
 - **Multi-agent discussion** — Sam (enthusiastic guide), Ellis (close reader), Kit (skeptic), plus Sable / Lucian / Vesper in After Dark.
 - **After Dark portal** — 18+ only, age-gated, with separate reading-history cookie so daylight and after-dark stay private from each other.

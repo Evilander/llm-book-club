@@ -12,6 +12,8 @@ from pypdf import PdfReader
 from ebooklib import ITEM_DOCUMENT, epub
 from bs4 import BeautifulSoup
 
+from .epub_text import document_text
+
 
 @dataclass
 class ExtractedSection:
@@ -35,6 +37,7 @@ class ExtractedBook:
     full_text: str
     sections: list[ExtractedSection]
     metadata: dict = field(default_factory=dict)
+    blocks: list[dict] = field(default_factory=list)
 
 
 # Common chapter heading patterns
@@ -156,7 +159,7 @@ def extract_pdf(file_data: bytes, filename: str) -> ExtractedBook:
     )
 
 
-def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
+def extract_epub(file_data: bytes, filename: str, *, legacy_text: bool = False) -> ExtractedBook:
     """Extract text and structure from an EPUB file."""
     # ebooklib doesn't work well with BytesIO, so use a temp file
     with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
@@ -208,6 +211,7 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
     # Extract text from spine items
     full_text_parts = []
     sections = []
+    blocks = []
     current_pos = 0
 
     # The manifest is a file inventory, not the reading order. Follow the spine
@@ -233,12 +237,16 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
         for tag in soup(["script", "style", "head"]):
             tag.decompose()
 
-        # Get text
-        text = soup.get_text(separator="\n", strip=True)
+        text, document_blocks = document_text(soup, legacy=legacy_text)
         if not text.strip():
             continue
 
         char_start = current_pos
+        for block in document_blocks:
+            blocks.append({**block, "char_start": block["char_start"] + char_start,
+                           "char_end": block["char_end"] + char_start,
+                           "marks": [{**mark, "char_start": mark["char_start"] + char_start,
+                                      "char_end": mark["char_end"] + char_start} for mark in block["marks"]]})
         full_text_parts.append(text)
         full_text_parts.append("\n\n")
         current_pos += len(text) + 2
@@ -249,7 +257,7 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
             # Try to find heading in content
             heading = soup.find(["h1", "h2", "h3"])
             if heading:
-                sec_title = heading.get_text(strip=True)
+                sec_title = document_text(heading)[0]
 
         # Determine section type
         sec_type = "chapter"
@@ -296,7 +304,8 @@ def extract_epub(file_data: bytes, filename: str) -> ExtractedBook:
         file_type="epub",
         full_text=full_text,
         sections=sections,
-        metadata={"section_count": len(sections)},
+        metadata={"section_count": len(sections), "epub_text_version": "fragments-v1" if legacy_text else "blocks-v1"},
+        blocks=blocks,
     )
 
 

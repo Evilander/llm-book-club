@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowLeft, ChevronLeft, ChevronRight, MessageCircle, X } from "lucide-react";
@@ -11,6 +11,8 @@ import { ReadingConnectionDialog } from "@/components/reading-connection-dialog"
 import { connectionRequest } from "@/components/chatgpt-connection";
 import { needsReadingConnection, ReadingConnectionRequired } from "@/lib/reading-connection";
 import { ReaderCompanion, type ReaderNote } from "@/components/reader-companion";
+
+import { PageProse, applyBionicText, type ReadingBlock } from "@/components/page-prose";
 
 export type ReaderTheme = "cream-daylight" | "aged-paper" | "archive-paper" | "paper-white" | "lamplight-dark";
 export type ReaderFont = "serif" | "lexend" | "atkinson" | "dyslexic";
@@ -23,6 +25,7 @@ interface ReaderPageData {
   total_pages: number; total_chars: number; current_section_id: string | null;
   current_section_title: string | null; current_section_order: number | null;
   text: string; char_start: number; char_end: number; edition_id: string;
+  blocks?: ReadingBlock[];
   chunks?: Array<{ chunk_id: string; section_id: string; char_start: number; char_end: number }>;
 }
 const PAPERS: Array<{ id: ReaderTheme; label: string; description: string }> = [
@@ -53,46 +56,12 @@ function safePrefs(value: Partial<ReaderPrefs>): ReaderPrefs {
     focus_reading_intensity: Math.min(60, Math.max(25, Number(value.focus_reading_intensity) || 40)),
   };
 }
-function applyBionicText(text: string, pct: number): React.ReactNode {
-  // Split on word boundaries, preserving punctuation + whitespace
-  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-  const parts = text.split(/(\s+|[^\p{L}\p{M}\p{N}’']+)/u);
-  return parts.map((part, idx) => {
-    if (!/\p{L}/u.test(part) || part.length < 4) {
-      return part;
-    }
-    const letters = Array.from(segmenter.segment(part), (item) => item.segment);
-    const n = Math.max(1, Math.round((letters.length * pct) / 100));
-    return (
-      <span key={idx}>
-        <b className="fr-b">{letters.slice(0, n).join("")}</b>
-        <span className="fr-r">{letters.slice(n).join("")}</span>
-      </span>
-    );
-  });
-}
-
-
-function PageProse({ text, start = 0, notes = [], onSelectNote, focusOn, focusPct }: {
-  text: string; start?: number; notes?: ReaderNote[]; onSelectNote?: (note: ReaderNote) => void; focusOn: boolean; focusPct: number;
-}) {
-  // Python API offsets count Unicode code points; JS string offsets count UTF-16.
-  const paragraphs = useMemo(() => {
-    let offset = start;
-    return text.split(/(\n\s*\n)/).map((part) => { const result = { text: part, start: offset }; offset += Array.from(part).length; return result; }).filter((part) => part.text.trim());
-  }, [text, start]);
-  return <div className={cn("lite-prose", focusOn && "is-focus")}>{paragraphs.map((paragraph) => {
-    const chars = Array.from(paragraph.text);
-    const end = paragraph.start + chars.length;
-    const here = notes.filter((note) => note.char_start < end && note.char_end > paragraph.start);
-    const edges = [...new Set([paragraph.start, end, ...here.flatMap((note) => [Math.max(paragraph.start, note.char_start), Math.min(end, note.char_end)])])].sort((a, b) => a - b);
-    return <p key={paragraph.start}>{edges.slice(0, -1).map((edge, index) => {
-      const fragment = chars.slice(edge - paragraph.start, edges[index + 1] - paragraph.start).join("");
-      const note = here.find((item) => item.char_start <= edge && item.char_end >= edges[index + 1]);
-      const content = focusOn ? applyBionicText(fragment, focusPct) : fragment;
-      return note ? <button type="button" className="passage-mark" key={edge} onClick={() => onSelectNote?.(note)} title={note.question} aria-label={`Discuss highlighted passage: ${fragment}`}>{content}</button> : <span key={edge}>{content}</span>;
-    })}</p>;
-  })}</div>;
+function PageHeading({ page }: { page: ReaderPageData }) {
+  if (page.page !== 1 || page.blocks?.length) return null;
+  const title = page.current_section_title || page.title;
+  // Plain-text fallback: do not print a title that is already in the source.
+  if (page.text.trimStart().toLocaleLowerCase().startsWith(title.toLocaleLowerCase())) return null;
+  return <><h1 className="lite-chap">{title}</h1><div className="lite-orn" aria-hidden="true">·</div></>;
 }
 
 function pageSizeForScreen(prefs: ReaderPrefs) {
@@ -363,13 +332,12 @@ export function LiteReader({ bookId, initialPage, initialPageSize = 1800 }: { bo
           onTouchStart={(event) => { touchStart.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }; }}
           onTouchEnd={(event) => { const start = touchStart.current; touchStart.current = null; if (!start || window.getSelection()?.toString()) return; const dx = event.changedTouches[0].clientX - start.x; const dy = event.changedTouches[0].clientY - start.y; if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 2) turnPage(dx < 0 ? "right" : "left"); else selectPassage(); }}>
           {error ? <div className="lite-error" role="alert"><p>{error}</p><button onClick={() => setAttempt((n) => n + 1)} className="lite-retry">Try again</button>{pageNum > 1 ? <button className="lite-retry" onClick={() => setPageNum(1)}>First page</button> : null}</div> : !page ? <div className="lite-loading" role="status">Opening the page…</div> : <>
-            <div className="lite-chapno">{page.current_section_order != null ? `Chapter ${page.current_section_order + 1}` : ""}</div>
-            <h1 className="lite-chap">{page.current_section_title || page.title}</h1><div className="lite-orn" aria-hidden="true">·</div>
-            <PageProse text={page.text} start={page.char_start} notes={citationHighlight ? [...notes, citationHighlight] : notes} onSelectNote={selectNote} focusOn={prefs.focus_reading} focusPct={prefs.focus_reading_intensity} />
+            <PageHeading page={page} />
+            <PageProse text={page.text} start={page.char_start} blocks={page.blocks} notes={citationHighlight ? [...notes, citationHighlight] : notes} onSelectNote={selectNote} focusOn={prefs.focus_reading} focusPct={prefs.focus_reading_intensity} />
             <div className="lite-folio"><span /> <span>{page.page}</span> <span /></div>
           </>}
         </article>
-        {snapshot && turning ? <div className={cn("paper-turn-sheet", `turn-${turning}`)} aria-hidden="true"><div className="lite-chapno">{snapshot.current_section_order != null ? `Chapter ${snapshot.current_section_order + 1}` : ""}</div><h2 className="lite-chap">{snapshot.current_section_title || snapshot.title}</h2><div className="lite-orn">·</div><PageProse text={snapshot.text} focusOn={prefs.focus_reading} focusPct={prefs.focus_reading_intensity} /><div className="lite-folio">{snapshot.page}</div></div> : null}
+        {snapshot && turning ? <div className={cn("paper-turn-sheet", `turn-${turning}`)} aria-hidden="true"><PageHeading page={snapshot} /><PageProse text={snapshot.text} start={snapshot.char_start} blocks={snapshot.blocks} focusOn={prefs.focus_reading} focusPct={prefs.focus_reading_intensity} /><div className="lite-folio">{snapshot.page}</div></div> : null}
       </div>
       <nav className="reader-pagination" aria-label="Page navigation"><button aria-label="Previous page" disabled={!page || loading || page.page <= 1 || !!turning} onClick={() => turnPage("left")}><ChevronLeft size={18} /><span>Previous</span></button><span aria-live="polite">{loading && page ? "Turning the page…" : page ? `Page ${page.page} of ${page.total_pages}` : ""}</span><button aria-label="Next page" disabled={!page || loading || page.page >= page.total_pages || !!turning} onClick={() => turnPage("right")}><span>Next</span><ChevronRight size={18} /></button></nav>
       {selectedText ? <button className="reading-button secondary discuss-selection" onClick={() => setCompanionOpen(true)}>Discuss selected passage <MessageCircle size={15} /></button> : null}

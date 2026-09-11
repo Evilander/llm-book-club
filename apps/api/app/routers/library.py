@@ -16,6 +16,7 @@ from ..db import Book, BookMemory, Chunk, IngestStatus, ReadingUnit, Section, ge
 from ..rate_limit import limiter
 from ..services.reading_progress import choose_section_for_unit
 from ..services.reader_text import assemble_reading_text, page_bounds
+from ..services.reader_layout import ReadingBlock, book_blocks, page_blocks
 from ..services.reading_scope import load_reading, load_reading_chunks
 from ..services.media_library import (
     ROOT_FOLDER_SENTINEL,
@@ -176,6 +177,7 @@ class ReaderPageResponse(BaseModel):
     char_start: int
     char_end: int  # exclusive, in the assembled reading edition
     chunks: list[ReaderChunkSpan] = []
+    blocks: list[ReadingBlock] = []
 
 
 class ExploreSectionSummary(BaseModel):
@@ -975,6 +977,7 @@ def read_book(
         char_start=start,
         char_end=end,
         chunks=page_chunks,
+        blocks=page_blocks(book_blocks(db, book, reading, chunks), start, end),
     )
 
 

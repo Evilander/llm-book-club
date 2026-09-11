@@ -381,3 +381,4 @@ await turningPage.waitForFunction(() => !document.querySelector('.paper-turn-she
 assert.match(turningPage.url(), /page=2/);
 await browser.close();
 console.log('PASS: desktop/mobile reading, paper persistence, exact highlights, page retry/resume, companion streaming, citation navigation, book club, dialogs, and ChatGPT connection lifecycle.');
+await import('./check-epub-layout.mjs');
